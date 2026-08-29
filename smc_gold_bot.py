@@ -1,11 +1,11 @@
 import requests
 import time
 from datetime import datetime
+import pytz
 
 # ==================== الإعدادات ====================
 TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
 CHAT_IDS       = ["6360489611", "8315710670"]
-SYMBOL         = "XAU/USD"
 
 SWING_LEN      = 10
 OB_LOOKBACK    = 60
@@ -16,7 +16,8 @@ MIN_RR         = 2.0
 USE_WICK_TOUCH = True
 REQUIRE_IDM    = False
 
-# ==================== إرسال رسالة للجميع ====================
+GAZA_TZ = pytz.timezone("Asia/Gaza")
+
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     for chat_id in CHAT_IDS:
@@ -25,7 +26,27 @@ def send_telegram(msg):
         except:
             pass
 
-# ==================== جلب بيانات الذهب ====================
+def send_morning_message():
+    now = datetime.now(GAZA_TZ)
+    day_ar = ["الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت","الأحد"][now.weekday()]
+    date_str = now.strftime(f"{day_ar} %d/%m/%Y")
+    msg = (
+        "🌅 <b>Good Morning Traders!</b> ☀️\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"📅 {date_str}\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📊 <b>SMC Gold Bot</b> | XAU/USD M5\n\n"
+        "🔍 <b>خطة اليوم:</b>\n"
+        "• راقب مناطق الأوردر بلوك\n"
+        "• انتظر تأكيد BOS أو CHOCH\n"
+        "• لا تدخل بدون إشارة واضحة\n\n"
+        "💡 <b>تذكّر:</b> الصبر أهم من الصفقات!\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🤖 البوت شغّال ويراقب السوق 24/5 ✅"
+    )
+    send_telegram(msg)
+    print(f"✅ رسالة الصباح - {date_str}")
+
 def get_candles():
     try:
         url = "https://api.twelvedata.com/time_series"
@@ -52,7 +73,6 @@ def get_candles():
     except:
         return None
 
-# ==================== Pivot High / Low ====================
 def pivot_high(highs, i, length):
     if i < length or i + length >= len(highs):
         return None
@@ -71,7 +91,6 @@ def pivot_low(lows, i, length):
             return None
     return val
 
-# ==================== تحليل SMC ====================
 def analyze(candles):
     opens  = [c["open"]  for c in candles]
     highs  = [c["high"]  for c in candles]
@@ -82,24 +101,18 @@ def analyze(candles):
     trend = 0
     pending_ph = None; pending_ph_bar = -1
     pending_pl = None; pending_pl_bar = -1
-    raw_last_ph = None; raw_last_pl = None
-
     idm_level = None; idm_swept = False; idm_is_high = False
     ob_list = []
-
     buy_signal = False; sell_signal = False
     sig_entry = sig_sl = sig_tp = sig_rr = None
 
     for i in range(n):
         ph = pivot_high(highs, i, SWING_LEN)
         pl = pivot_low(lows, i, SWING_LEN)
-
         if ph is not None:
             pending_ph = ph; pending_ph_bar = i - SWING_LEN
-            raw_last_ph = ph
         if pl is not None:
             pending_pl = pl; pending_pl_bar = i - SWING_LEN
-            raw_last_pl = pl
 
         bull_break = (pending_ph is not None and i > 0 and
                       closes[i-1] <= pending_ph and closes[i] > pending_ph)
@@ -172,19 +185,26 @@ def analyze(candles):
             "sl": sig_sl, "tp": sig_tp, "rr": sig_rr, "trend": trend,
             "time": candles[-1]["time"] if candles else ""}
 
-# ==================== الحلقة الرئيسية ====================
 def main():
     send_telegram(
         "🤖 <b>SMC Gold Bot</b> شغّال!\n"
         "📊 الزوج: XAU/USD | فريم M5\n"
-        "⏳ يراقب السوق ويرسل إشارات شراء/بيع تلقائياً..."
+        "⏳ يراقب السوق ويرسل إشارات شراء/بيع تلقائياً\n"
+        "🌅 رسالة صباحية كل يوم الساعة 8:00 ✅"
     )
     print("✅ البوت شغّال - يراقب XAUUSD M5")
 
     last_signal_time = ""
+    morning_sent_date = ""
 
     while True:
         try:
+            now_gaza = datetime.now(GAZA_TZ)
+            today_str = now_gaza.strftime("%Y-%m-%d")
+            if now_gaza.hour == 8 and now_gaza.minute == 0 and morning_sent_date != today_str:
+                send_morning_message()
+                morning_sent_date = today_str
+
             candles = get_candles()
             if candles is None or len(candles) < 50:
                 print("⚠️ ما قدر يجيب البيانات")
@@ -213,15 +233,15 @@ def main():
                     f"🕐 {current_time}"
                 )
                 send_telegram(msg)
-                print(f"✅ إشارة أُرسلت: {direction} @ {result['entry']:.2f}")
+                print(f"✅ إشارة: {direction} @ {result['entry']:.2f}")
             else:
                 trend_txt = "صاعد 📈" if result["trend"] == 1 else ("هابط 📉" if result["trend"] == -1 else "محايد")
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] مراقبة... الترند: {trend_txt} | السعر: {candles[-1]['close']:.2f}")
+                print(f"[{now_gaza.strftime('%H:%M:%S')}] مراقبة... الترند: {trend_txt} | السعر: {candles[-1]['close']:.2f}")
 
         except Exception as e:
             print(f"❌ خطأ: {e}")
 
-        time.sleep(300)
+        time.sleep(60)
 
 if __name__ == "__main__":
     main()
