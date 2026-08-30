@@ -5,7 +5,7 @@ import pytz
 
 # ==================== الإعدادات ====================
 TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
-CHAT_IDS       = ["6360489611", "8315710670"]
+CHAT_IDS = ["6360489611", "8315710670", "1266693223"]
 
 SWING_LEN      = 10
 OB_LOOKBACK    = 60
