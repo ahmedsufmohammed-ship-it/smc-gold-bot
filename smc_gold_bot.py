@@ -9,8 +9,9 @@ import pytz
 # ==================== الإعدادات ====================
 TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
-BROADCASTER_ID = "6360489611"  # أنت فقط تبعث للكل
+BROADCASTER_ID = "6360489611"
 MEMBERS_FILE   = "members.json"
+AV_API_KEY     = "ZI7EPF7HOKTHPOTL"
 
 SWING_LEN      = 10
 OB_LOOKBACK    = 60
@@ -28,7 +29,6 @@ def load_members():
     if os.path.exists(MEMBERS_FILE):
         with open(MEMBERS_FILE, "r") as f:
             return json.load(f)
-    # الأدمن دايماً موجودين
     save_members(ADMIN_IDS.copy())
     return ADMIN_IDS.copy()
 
@@ -67,16 +67,12 @@ def send_telegram(msg, chat_id=None):
 def broadcast(msg):
     send_telegram(msg)
 
-# ==================== معالجة رسائل الأدمن ====================
+# ==================== معالجة رسائل ====================
 def handle_admin_message(chat_id, text, first_name):
     chat_id = str(chat_id)
-
-    # الأدمن يشترك ويلغي مثل أي عضو
     if text in ["/start", "/stop"]:
         handle_member_message(chat_id, text, first_name)
         return
-
-    # أوامر الأدمن
     if text == "/members":
         members = load_members()
         send_telegram(
@@ -84,49 +80,31 @@ def handle_admin_message(chat_id, text, first_name):
             f"━━━━━━━━━━━━━━━━━━\n"
             f"العدد الكلي: <b>{len(members)}</b> عضو\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"🤖 SMC Gold Bot",
-            chat_id
-        )
+            f"🤖 SMC Gold Bot", chat_id)
         return
-
     if text == "/help":
         send_telegram(
             "⚙️ <b>أوامر الأدمن:</b>\n"
             "━━━━━━━━━━━━━━━━━━\n"
             "/members — عدد الأعضاء\n"
             "/help — قائمة الأوامر\n\n"
-            "📢 <b>للبث:</b>\n"
-            "ابعث أي رسالة عادية وتوصل لكل الأعضاء تلقائياً\n"
+            "📢 ابعث أي رسالة عادية تتوصل للكل\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "🤖 SMC Gold Bot",
-            chat_id
-        )
+            "🤖 SMC Gold Bot", chat_id)
         return
-
-    # بس أنت تقدر تبث للكل
     if chat_id == BROADCASTER_ID:
         members = load_members()
-        count = len(members)
         broadcast(
             f"📢 <b>رسالة من الإدارة:</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"{text}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"🤖 SMC Gold Bot"
+            f"{text}"
         )
-        send_telegram(f"✅ تم إرسال رسالتك لـ <b>{count}</b> عضو", chat_id)
+        send_telegram(f"✅ تم إرسال رسالتك لـ <b>{len(members)}</b> عضو", chat_id)
     else:
-        send_telegram(
-            f"أوامر الأدمن:\n"
-            f"/members — عدد الأعضاء\n"
-            f"/help — المساعدة",
-            chat_id
-        )
+        send_telegram("أوامر الأدمن:\n/members\n/help", chat_id)
 
-# ==================== معالجة رسائل الأعضاء ====================
 def handle_member_message(chat_id, text, first_name):
     chat_id = str(chat_id)
-
     if text == "/start":
         added = add_member(chat_id)
         if added:
@@ -141,69 +119,46 @@ def handle_member_message(chat_id, text, first_name):
                 f"🌅 ورسالة صباحية يومياً\n\n"
                 f"للإلغاء: /stop\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"🤖 SMC Gold Bot",
-                chat_id
-            )
-            # إشعار الأدمن
-            members_count = len(members)
+                f"🤖 SMC Gold Bot", chat_id)
             for admin in ADMIN_IDS:
                 send_telegram(
-                    f"👤 عضو جديد انضم!\n"
+                    f"👤 عضو جديد!\n"
                     f"الاسم: {first_name}\n"
                     f"ID: {chat_id}\n"
-                    f"المجموع: {members_count} عضو",
-                    admin
-                )
+                    f"المجموع: {len(members)} عضو", admin)
         else:
-            send_telegram(
-                f"✅ {first_name} أنت مشترك أصلاً!\n"
-                f"للإلغاء: /stop",
-                chat_id
-            )
+            send_telegram(f"✅ أنت مشترك أصلاً!\nللإلغاء: /stop", chat_id)
         return
-
     if text == "/stop":
-        removed = remove_member(chat_id)
-        if removed:
-            send_telegram(
-                f"😔 تم إلغاء اشتراكك {first_name}\n"
-                f"للاشتراك مجدداً: /start",
-                chat_id
-            )
+        if remove_member(chat_id):
+            send_telegram(f"😔 تم إلغاء اشتراكك {first_name}\nللاشتراك: /start", chat_id)
         else:
-            send_telegram("أنت غير مشترك أو لا يمكن إلغاء اشتراكك.", chat_id)
+            send_telegram("أنت غير مشترك.", chat_id)
         return
-
-    # رسالة عادية من عضو
     send_telegram(
         f"مرحباً {first_name} 👋\n"
-        f"هذا البوت للإشارات فقط.\n\n"
         f"/start — اشتراك\n"
-        f"/stop — إلغاء الاشتراك",
-        chat_id
-    )
+        f"/stop — إلغاء الاشتراك", chat_id)
 
-# ==================== استقبال رسائل التيليغرام ====================
+# ==================== استقبال رسائل ====================
 def get_updates(offset=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-    params = {"timeout": 30, "offset": offset}
     try:
-        r = requests.get(url, params=params, timeout=35)
+        r = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
+            params={"timeout": 30, "offset": offset}, timeout=35)
         return r.json().get("result", [])
     except:
         return []
 
 def process_updates(offset):
-    updates = get_updates(offset)
-    for update in updates:
+    for update in get_updates(offset):
         offset = update["update_id"] + 1
         try:
-            msg      = update.get("message", {})
-            chat_id  = msg.get("chat", {}).get("id")
-            text     = msg.get("text", "").strip()
-            first    = msg.get("from", {}).get("first_name", "")
-            if not chat_id or not text:
-                continue
+            msg     = update.get("message", {})
+            chat_id = msg.get("chat", {}).get("id")
+            text    = msg.get("text", "").strip()
+            first   = msg.get("from", {}).get("first_name", "")
+            if not chat_id or not text: continue
             if str(chat_id) in ADMIN_IDS:
                 handle_admin_message(chat_id, text, first)
             else:
@@ -212,52 +167,95 @@ def process_updates(offset):
             pass
     return offset
 
+# ==================== جلب بيانات الذهب - Alpha Vantage ====================
+def get_candles():
+    try:
+        r = requests.get(
+            "https://www.alphavantage.co/query",
+            params={
+                "function"   : "FX_INTRADAY",
+                "from_symbol": "XAU",
+                "to_symbol"  : "USD",
+                "interval"   : "5min",
+                "outputsize" : "compact",
+                "apikey"     : AV_API_KEY
+            }, timeout=20)
+        data = r.json()
+
+        # مفتاح البيانات
+        key = "Time Series FX (5min)"
+        if key not in data:
+            # جرّب FX_INTRADAY للذهب عبر CURRENCY
+            r2 = requests.get(
+                "https://www.alphavantage.co/query",
+                params={
+                    "function" : "TIME_SERIES_INTRADAY",
+                    "symbol"   : "XAUUSD",
+                    "interval" : "5min",
+                    "outputsize": "compact",
+                    "apikey"   : AV_API_KEY
+                }, timeout=20)
+            data2 = r2.json()
+            key2 = "Time Series (5min)"
+            if key2 not in data2:
+                print(f"⚠️ Alpha Vantage: {data.get('Note') or data.get('Information') or 'لا بيانات'}")
+                return None
+            series = data2[key2]
+        else:
+            series = data[key]
+
+        candles = []
+        for dt_str in sorted(series.keys()):
+            v = series[dt_str]
+            candles.append({
+                "time" : dt_str,
+                "open" : float(v.get("1. open", v.get("open", 0))),
+                "high" : float(v.get("2. high", v.get("high", 0))),
+                "low"  : float(v.get("3. low",  v.get("low",  0))),
+                "close": float(v.get("4. close", v.get("close",0)))
+            })
+        return candles if len(candles) >= 50 else None
+    except Exception as e:
+        print(f"❌ خطأ Alpha Vantage: {e}")
+        return None
+
 # ==================== أخبار USD ====================
 def get_usd_news():
     try:
-        url = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
-        r = requests.get(url, timeout=15)
+        r = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.xml", timeout=15)
         root = ET.fromstring(r.content)
         news_list = []
-        now_gaza = datetime.now(GAZA_TZ)
-        today = now_gaza.date()
+        today = datetime.now(GAZA_TZ).date()
         for event in root.findall("event"):
             try:
                 if event.findtext("country","").upper() != "USD": continue
-                title    = event.findtext("title","")
-                impact   = event.findtext("impact","").lower()
-                date_str = event.findtext("date","")
-                time_str = event.findtext("time","")
-                if not date_str or not time_str: continue
-                dt_str = f"{date_str} {time_str}"
+                title  = event.findtext("title","")
+                impact = event.findtext("impact","").lower()
+                d_str  = event.findtext("date","")
+                t_str  = event.findtext("time","")
+                if not d_str or not t_str: continue
                 try:
-                    dt_utc = datetime.strptime(dt_str, "%m-%d-%Y %I:%M%p")
+                    dt_utc = datetime.strptime(f"{d_str} {t_str}", "%m-%d-%Y %I:%M%p")
                 except:
-                    dt_utc = datetime.strptime(dt_str, "%m-%d-%Y %I:%M %p")
-                dt_utc  = pytz.utc.localize(dt_utc)
-                dt_gaza = dt_utc.astimezone(GAZA_TZ)
+                    dt_utc = datetime.strptime(f"{d_str} {t_str}", "%m-%d-%Y %I:%M %p")
+                dt_gaza = pytz.utc.localize(dt_utc).astimezone(GAZA_TZ)
                 if dt_gaza.date() != today: continue
                 if impact in ["high","medium","low"]:
-                    news_list.append({
-                        "title"   : title,
-                        "impact"  : impact,
-                        "time"    : dt_gaza,
-                        "time_str": dt_gaza.strftime("%I:%M %p")
-                    })
+                    news_list.append({"title": title, "impact": impact,
+                                      "time": dt_gaza, "time_str": dt_gaza.strftime("%I:%M %p")})
             except: continue
-        news_list.sort(key=lambda x: x["time"])
-        return news_list
+        return sorted(news_list, key=lambda x: x["time"])
     except Exception as e:
-        print(f"خطأ في الأخبار: {e}")
+        print(f"خطأ أخبار: {e}")
         return []
 
 def is_high_impact_news_time(news_list):
     now = datetime.now(GAZA_TZ)
-    for news in news_list:
-        if news["impact"] == "high":
-            diff = (news["time"] - now).total_seconds() / 60
+    for n in news_list:
+        if n["impact"] == "high":
+            diff = (n["time"] - now).total_seconds() / 60
             if -15 <= diff <= 15:
-                return True, news
+                return True, n
     return False, None
 
 def send_news_message(news_list):
@@ -265,11 +263,7 @@ def send_news_message(news_list):
     high   = [n for n in news_list if n["impact"] == "high"]
     medium = [n for n in news_list if n["impact"] == "medium"]
     low    = [n for n in news_list if n["impact"] == "low"]
-    msg = (
-        "📰 <b>أخبار USD اليوم</b>\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🕐 <i>الأوقات بتوقيت غزة</i>\n\n"
-    )
+    msg = "📰 <b>أخبار USD اليوم</b>\n━━━━━━━━━━━━━━━━━━\n🕐 <i>الأوقات بتوقيت غزة</i>\n\n"
     if high:
         msg += "🔴 <b>أخبار قوية — ابتعد عن التداول:</b>\n"
         for n in high: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
@@ -279,57 +273,37 @@ def send_news_message(news_list):
         for n in medium: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
         msg += "\n"
     if low:
-        msg += "🟢 <b>أخبار ضعيفة — لا تأثير كبير:</b>\n"
+        msg += "🟢 <b>أخبار ضعيفة:</b>\n"
         for n in low: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
         msg += "\n"
-    msg += (
-        "━━━━━━━━━━━━━━━━━━\n"
-        "⚠️ لا تتداول 15 دقيقة قبل وبعد الأخبار القوية 🔴\n"
-        "🤖 SMC Gold Bot"
-    )
+    msg += "━━━━━━━━━━━━━━━━━━\n⚠️ لا تتداول 15 دقيقة قبل وبعد الأخبار القوية 🔴\n🤖 SMC Gold Bot"
     broadcast(msg)
 
 def send_morning_message(news_list):
     now = datetime.now(GAZA_TZ)
     day_ar = ["الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت","الأحد"][now.weekday()]
-    date_str = now.strftime(f"{day_ar} %d/%m/%Y")
     high_news = [n for n in news_list if n["impact"] == "high"]
     news_warn = ""
     if high_news:
         news_warn = "\n⚠️ <b>تحذير:</b> يوم فيه أخبار قوية!\n"
         for n in high_news: news_warn += f"   🔴 {n['time_str']} | {n['title']}\n"
-    msg = (
-        "🌅 <b>Good Morning Traders!</b> ☀️\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        f"📅 {date_str}\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "📊 <b>SMC Gold Bot</b> | XAU/USD M5\n"
+    broadcast(
+        f"🌅 <b>Good Morning Traders!</b> ☀️\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📅 {now.strftime(f'{day_ar} %d/%m/%Y')}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📊 <b>SMC Gold Bot</b> | XAU/USD M5\n"
         f"{news_warn}\n"
-        "🔍 <b>خطة اليوم:</b>\n"
-        "• راقب مناطق الأوردر بلوك\n"
-        "• انتظر تأكيد BOS أو CHOCH\n"
-        "• لا تدخل بدون إشارة واضحة\n\n"
-        "💡 <b>تذكّر:</b> الصبر أهم من الصفقات!\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "🤖 البوت شغّال ويراقب السوق 24/5 ✅"
+        f"🔍 <b>خطة اليوم:</b>\n"
+        f"• راقب مناطق الأوردر بلوك\n"
+        f"• انتظر تأكيد BOS أو CHOCH\n"
+        f"• لا تدخل بدون إشارة واضحة\n\n"
+        f"💡 <b>تذكّر:</b> الصبر أهم من الصفقات!\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 البوت شغّال ويراقب السوق 24/5 ✅"
     )
-    broadcast(msg)
-    print(f"✅ رسالة الصباح - {date_str}")
 
-# ==================== جلب بيانات الذهب ====================
-def get_candles():
-    try:
-        r = requests.get("https://api.twelvedata.com/time_series", params={
-            "symbol": "XAU/USD", "interval": "5min",
-            "outputsize": 200, "apikey": "0cef5bb56a314b6289f3db0b648f84b5"
-        }, timeout=15)
-        data = r.json()
-        if "values" not in data: return None
-        return [{"time": v["datetime"], "open": float(v["open"]),
-                 "high": float(v["high"]), "low": float(v["low"]),
-                 "close": float(v["close"])} for v in reversed(data["values"])]
-    except: return None
-
+# ==================== Pivot ====================
 def pivot_high(highs, i, length):
     if i < length or i + length >= len(highs): return None
     val = highs[i]
@@ -344,6 +318,7 @@ def pivot_low(lows, i, length):
         if lows[i-j] <= val or lows[i+j] <= val: return None
     return val
 
+# ==================== تحليل SMC ====================
 def analyze(candles):
     opens  = [c["open"]  for c in candles]
     highs  = [c["high"]  for c in candles]
@@ -440,7 +415,7 @@ def main():
         "━━━━━━━━━━━━━━━━━━\n"
         "✅ جاهز للعمل!"
     )
-    print("✅ البوت شغّال")
+    print("✅ البوت شغّال - Alpha Vantage | XAUUSD M5")
 
     offset            = None
     last_signal_time  = ""
@@ -452,29 +427,24 @@ def main():
 
     while True:
         try:
-            # استقبال رسائل
-            offset = process_updates(offset)
-
+            offset    = process_updates(offset)
             now_gaza  = datetime.now(GAZA_TZ)
             today_str = now_gaza.strftime("%Y-%m-%d")
 
-            # جلب الأخبار مرة باليوم
             if news_sent_date != today_str:
                 daily_news     = get_usd_news()
                 news_sent_date = today_str
 
-            # رسالة الصباح 8:00 AM
             if now_gaza.hour == 8 and now_gaza.minute == 0 and morning_sent_date != today_str:
                 send_morning_message(daily_news)
                 send_news_message(daily_news)
                 morning_sent_date = today_str
 
-            # تنبيه قبل خبر قوي 15 دقيقة
             for news in daily_news:
                 if news["impact"] == "high":
-                    diff_min = (news["time"] - now_gaza).total_seconds() / 60
-                    key = news["time_str"] + "_" + today_str
-                    if 14 <= diff_min <= 15 and key+"_pre" not in news_alert_sent:
+                    diff = (news["time"] - now_gaza).total_seconds() / 60
+                    key  = news["time_str"] + "_" + today_str
+                    if 14 <= diff <= 15 and key+"_pre" not in news_alert_sent:
                         news_alert_sent.add(key+"_pre")
                         broadcast(
                             f"🚨 <b>تحذير خبر قوي!</b>\n"
@@ -486,7 +456,7 @@ def main():
                             f"⏳ انتظر 15 دقيقة بعد الخبر\n"
                             f"🤖 SMC Gold Bot"
                         )
-                    if -16 <= diff_min <= -15 and key+"_post" not in news_alert_sent:
+                    if -16 <= diff <= -15 and key+"_post" not in news_alert_sent:
                         news_alert_sent.add(key+"_post")
                         broadcast(
                             f"✅ <b>انتهى وقت الخبر</b>\n"
@@ -497,13 +467,13 @@ def main():
                             f"🤖 SMC Gold Bot"
                         )
 
-            # تحليل السوق كل دقيقة
+            # كل 5 دقايق = 288 طلب باليوم (ضمن حد Alpha Vantage المجاني)
             now_ts = time.time()
-            if now_ts - last_candle_check >= 60:
+            if now_ts - last_candle_check >= 300:
                 last_candle_check = now_ts
                 in_news, news_obj = is_high_impact_news_time(daily_news)
                 candles = get_candles()
-                if candles and len(candles) >= 50:
+                if candles:
                     result = analyze(candles)
                     current_time = result["time"]
                     if (result["buy"] or result["sell"]) and current_time != last_signal_time:
@@ -537,6 +507,7 @@ def main():
                                 f"🕐 {current_time}\n"
                                 f"🤖 SMC Gold Bot"
                             )
+                        print(f"✅ إشارة: {direction} @ {result['entry']:.2f}")
                     else:
                         trend_txt = "صاعد 📈" if result["trend"]==1 else ("هابط 📉" if result["trend"]==-1 else "محايد")
                         print(f"[{now_gaza.strftime('%H:%M:%S')}] {trend_txt} | {candles[-1]['close']:.2f}")
