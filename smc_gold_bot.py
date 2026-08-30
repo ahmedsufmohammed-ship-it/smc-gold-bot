@@ -9,6 +9,7 @@ import pytz
 # ==================== الإعدادات ====================
 TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
+BROADCASTER_ID = "6360489611"  # أنت فقط تبعث للكل
 MEMBERS_FILE   = "members.json"
 
 SWING_LEN      = 10
@@ -70,6 +71,11 @@ def broadcast(msg):
 def handle_admin_message(chat_id, text, first_name):
     chat_id = str(chat_id)
 
+    # الأدمن يشترك ويلغي مثل أي عضو
+    if text in ["/start", "/stop"]:
+        handle_member_message(chat_id, text, first_name)
+        return
+
     # أوامر الأدمن
     if text == "/members":
         members = load_members()
@@ -97,17 +103,25 @@ def handle_admin_message(chat_id, text, first_name):
         )
         return
 
-    # أي رسالة ثانية من الأدمن = بث للكل
-    members = load_members()
-    count = len(members)
-    broadcast(
-        f"📢 <b>رسالة من الإدارة:</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"{text}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 SMC Gold Bot"
-    )
-    send_telegram(f"✅ تم إرسال رسالتك لـ <b>{count}</b> عضو", chat_id)
+    # بس أنت تقدر تبث للكل
+    if chat_id == BROADCASTER_ID:
+        members = load_members()
+        count = len(members)
+        broadcast(
+            f"📢 <b>رسالة من الإدارة:</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{text}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 SMC Gold Bot"
+        )
+        send_telegram(f"✅ تم إرسال رسالتك لـ <b>{count}</b> عضو", chat_id)
+    else:
+        send_telegram(
+            f"أوامر الأدمن:\n"
+            f"/members — عدد الأعضاء\n"
+            f"/help — المساعدة",
+            chat_id
+        )
 
 # ==================== معالجة رسائل الأعضاء ====================
 def handle_member_message(chat_id, text, first_name):
