@@ -11,7 +11,7 @@ TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
 BROADCASTER_ID = "6360489611"
 MEMBERS_FILE   = "members.json"
-AV_API_KEY     = "ZI7EPF7HOKTHPOTL"
+
 
 SWING_LEN      = 10
 OB_LOOKBACK    = 60
@@ -167,56 +167,46 @@ def process_updates(offset):
             pass
     return offset
 
-# ==================== جلب بيانات الذهب - Alpha Vantage ====================
+# ==================== جلب بيانات الذهب - Yahoo Finance ====================
 def get_candles():
     try:
-        r = requests.get(
-            "https://www.alphavantage.co/query",
-            params={
-                "function"   : "FX_INTRADAY",
-                "from_symbol": "XAU",
-                "to_symbol"  : "USD",
-                "interval"   : "5min",
-                "outputsize" : "compact",
-                "apikey"     : AV_API_KEY
-            }, timeout=20)
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/GC=F"
+        params = {
+            "interval" : "5m",
+            "range"    : "1d"
+        }
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, params=params, headers=headers, timeout=20)
         data = r.json()
 
-        # مفتاح البيانات
-        key = "Time Series FX (5min)"
-        if key not in data:
-            # جرّب FX_INTRADAY للذهب عبر CURRENCY
-            r2 = requests.get(
-                "https://www.alphavantage.co/query",
-                params={
-                    "function" : "TIME_SERIES_INTRADAY",
-                    "symbol"   : "XAUUSD",
-                    "interval" : "5min",
-                    "outputsize": "compact",
-                    "apikey"   : AV_API_KEY
-                }, timeout=20)
-            data2 = r2.json()
-            key2 = "Time Series (5min)"
-            if key2 not in data2:
-                print(f"⚠️ Alpha Vantage: {data.get('Note') or data.get('Information') or 'لا بيانات'}")
-                return None
-            series = data2[key2]
-        else:
-            series = data[key]
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            print("⚠️ Yahoo Finance: لا بيانات")
+            return None
+
+        ts        = result[0]["timestamp"]
+        ohlcv     = result[0]["indicators"]["quote"][0]
+        opens     = ohlcv.get("open", [])
+        highs     = ohlcv.get("high", [])
+        lows      = ohlcv.get("low", [])
+        closes    = ohlcv.get("close", [])
 
         candles = []
-        for dt_str in sorted(series.keys()):
-            v = series[dt_str]
+        for i in range(len(ts)):
+            if opens[i] is None or closes[i] is None:
+                continue
+            dt = datetime.fromtimestamp(ts[i], tz=GAZA_TZ).strftime("%Y-%m-%d %H:%M")
             candles.append({
-                "time" : dt_str,
-                "open" : float(v.get("1. open", v.get("open", 0))),
-                "high" : float(v.get("2. high", v.get("high", 0))),
-                "low"  : float(v.get("3. low",  v.get("low",  0))),
-                "close": float(v.get("4. close", v.get("close",0)))
+                "time" : dt,
+                "open" : float(opens[i]),
+                "high" : float(highs[i]),
+                "low"  : float(lows[i]),
+                "close": float(closes[i])
             })
+
         return candles if len(candles) >= 50 else None
     except Exception as e:
-        print(f"❌ خطأ Alpha Vantage: {e}")
+        print(f"❌ خطأ Yahoo Finance: {e}")
         return None
 
 # ==================== أخبار USD ====================
