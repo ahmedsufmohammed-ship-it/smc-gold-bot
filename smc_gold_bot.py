@@ -7,7 +7,7 @@ from datetime import datetime
 from xml.etree import ElementTree as ET
 import pytz
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "PUT_YOUR_TOKEN_HERE")
+TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
 BROADCASTER_ID = "6360489611"
 MEMBERS_FILE   = "members.json"
@@ -175,7 +175,7 @@ def get_candles():
                 "symbol"    : "XAU/USD",
                 "interval"  : "5min",
                 "outputsize": 200,
-                "apikey"    : os.environ.get("TWELVEDATA_API_KEY", "PUT_YOUR_API_KEY_HERE")
+                "apikey"    : "0cef5bb56a314b6289f3db0b648f84b5"
             }, timeout=20)
         data = r.json()
 
