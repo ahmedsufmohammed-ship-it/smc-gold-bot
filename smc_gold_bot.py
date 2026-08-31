@@ -516,6 +516,9 @@ def main():
                     candle_history.append(current_candle)
                     candle_history = candle_history[-MAX_CANDLES_KEEP:]
                     save_candles(candle_history)
+                    closed = candle_history[-1]
+                    print(f"🕯️ {closed['time']} | O:{closed['open']:.2f} H:{closed['high']:.2f} "
+                          f"L:{closed['low']:.2f} C:{closed['close']:.2f} | إجمالي {len(candle_history)} شمعة")
                     current_candle = {"time": bkey_str, "open": price, "high": price, "low": price, "close": price}
                     current_bucket = bkey_str
                     candle_closed = True
