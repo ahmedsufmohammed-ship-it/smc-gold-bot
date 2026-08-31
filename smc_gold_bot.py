@@ -21,6 +21,7 @@ USE_WICK_TOUCH = True
 REQUIRE_IDM    = False
 GAZA_TZ        = pytz.timezone("Asia/Gaza")
 
+# ==================== الأعضاء ====================
 def load_members():
     if os.path.exists(MEMBERS_FILE):
         with open(MEMBERS_FILE, "r") as f:
@@ -50,6 +51,7 @@ def remove_member(chat_id):
         return True
     return False
 
+# ==================== تيليغرام ====================
 def send_telegram(msg, chat_id=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     targets = [str(chat_id)] if chat_id else load_members()
@@ -62,6 +64,7 @@ def send_telegram(msg, chat_id=None):
 def broadcast(msg):
     send_telegram(msg)
 
+# ==================== معالجة رسائل ====================
 def handle_admin_message(chat_id, text, first_name):
     chat_id = str(chat_id)
     if text in ["/start", "/stop"]:
@@ -89,7 +92,7 @@ def handle_member_message(chat_id, text, first_name):
             members = load_members()
             send_telegram(
                 f"🎉 <b>أهلاً {first_name}!</b>\n━━━━━━━━━━━━━━━━━━\n"
-                f"تم اشتراكك في <b>SMC Gold Bot</b> ✅\n"
+                f"تم تفعيل اشتراكك ✅\n"
                 f"📊 XAU/USD | M5\n📈 إشارات شراء/بيع\n"
                 f"📰 تنبيهات أخبار USD\n🌅 رسالة صباحية\n"
                 f"للإلغاء: /stop", chat_id)
@@ -132,11 +135,12 @@ def process_updates(offset):
             pass
     return offset
 
+# ==================== بيانات الذهب ====================
 def get_candles():
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(
-            "https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
+            "https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X",
             params={"interval": "5m", "range": "5d"},
             headers=headers, timeout=20)
         data = r.json()
@@ -152,20 +156,22 @@ def get_candles():
         closes = ohlcv.get("close", [])
         candles = []
         for i in range(len(ts)):
-            if opens[i] is None or closes[i] is None:
-                continue
+            if opens[i] is None or closes[i] is None: continue
             dt = datetime.fromtimestamp(ts[i], tz=GAZA_TZ).strftime("%Y-%m-%d %H:%M")
             candles.append({
-                "time": dt, "open": float(opens[i]),
-                "high": float(highs[i]), "low": float(lows[i]),
-                "close": float(closes[i])
+                "time": dt,
+                "open":  float(opens[i]),
+                "high":  float(highs[i]),
+                "low":   float(lows[i]),
+                "close": float(closes[i]),
             })
-        print(f"✅ Yahoo: {len(candles)} شمعة | آخر سعر: {candles[-1]['close']:.2f}")
+        print(f"✅ Yahoo: {len(candles)} شمعة | {candles[-1]['close']:.2f}")
         return candles if len(candles) >= 50 else None
     except Exception as e:
-        print(f"❌ Yahoo خطأ: {e}")
+        print(f"❌ Yahoo: {e}")
         return None
 
+# ==================== أخبار ====================
 def get_usd_news():
     try:
         r = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.xml", timeout=15)
@@ -211,7 +217,7 @@ def send_news_message(news_list):
     low    = [n for n in news_list if n["impact"] == "low"]
     msg = "📰 <b>أخبار USD اليوم</b>\n━━━━━━━━━━━━━━━━━━\n🕐 <i>بتوقيت غزة</i>\n\n"
     if high:
-        msg += "🔴 <b>قوية — ابتعد عن التداول:</b>\n"
+        msg += "🔴 <b>قوية — ابتعد:</b>\n"
         for n in high: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
         msg += "\n"
     if medium:
@@ -222,7 +228,7 @@ def send_news_message(news_list):
         msg += "🟢 <b>ضعيفة:</b>\n"
         for n in low: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
         msg += "\n"
-    msg += "━━━━━━━━━━━━━━━━━━\n⚠️ لا تتداول 15د قبل وبعد الأخبار القوية\n🤖 SMC Gold Bot"
+    msg += "━━━━━━━━━━━━━━━━━━\n⚠️ لا تتداول 15د قبل وبعد القوية"
     broadcast(msg)
 
 def send_morning_message(news_list):
@@ -234,21 +240,15 @@ def send_morning_message(news_list):
         news_warn = "\n⚠️ <b>يوم فيه أخبار قوية!</b>\n"
         for n in high_news: news_warn += f"   🔴 {n['time_str']} | {n['title']}\n"
     broadcast(
-        f"🌅 <b>Good Morning Traders!</b> ☀️\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"📅 {now.strftime(f'{day_ar} %d/%m/%Y')}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"📊 <b>SMC Gold Bot</b> | XAU/USD M5\n"
-        f"{news_warn}\n"
-        f"🔍 <b>خطة اليوم:</b>\n"
-        f"• راقب مناطق الأوردر بلوك\n"
-        f"• انتظر تأكيد BOS أو CHOCH\n"
-        f"• لا تدخل بدون إشارة واضحة\n\n"
-        f"💡 الصبر أهم من الصفقات!\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 البوت شغّال ويراقب السوق 24/5 ✅"
-    )
+        f"🌅 <b>Good Morning Traders!</b> ☀️\n━━━━━━━━━━━━━━━━━━\n"
+        f"📅 {now.strftime(f'{day_ar} %d/%m/%Y')}\n━━━━━━━━━━━━━━━━━━\n"
+        f"📊 XAU/USD | M5\n{news_warn}\n"
+        f"🔍 <b>خطة اليوم:</b>\n• راقب الأوردر بلوك\n"
+        f"• انتظر BOS أو CHOCH\n• لا تدخل بدون إشارة\n\n"
+        f"💡 الصبر أهم من الصفقات!\n━━━━━━━━━━━━━━━━━━\n"
+        f"بالتوفيق للجميع 🌟")
 
+# ==================== Pivot ====================
 def pivot_high(highs, i, length):
     if i < length or i + length >= len(highs): return None
     val = highs[i]
@@ -263,6 +263,7 @@ def pivot_low(lows, i, length):
         if lows[i-j] <= val or lows[i+j] <= val: return None
     return val
 
+# ==================== تحليل SMC ====================
 def analyze(candles):
     opens  = [c["open"]  for c in candles]
     highs  = [c["high"]  for c in candles]
@@ -294,7 +295,8 @@ def analyze(candles):
                 idx = i-k
                 if idx < start: break
                 if closes[idx] < opens[idx]:
-                    ob_list.append({"top": highs[idx], "bottom": lows[idx], "bullish": True, "touches": 0, "valid": True, "signaled": False})
+                    ob_list.append({"top": highs[idx], "bottom": lows[idx], "bullish": True,
+                                    "touches": 0, "valid": True, "signaled": False})
                     if len(ob_list) > MAX_OB_KEEP: ob_list.pop(0)
                     break
             pending_ph = None
@@ -307,7 +309,8 @@ def analyze(candles):
                 idx = i-k
                 if idx < start: break
                 if closes[idx] > opens[idx]:
-                    ob_list.append({"top": highs[idx], "bottom": lows[idx], "bullish": False, "touches": 0, "valid": True, "signaled": False})
+                    ob_list.append({"top": highs[idx], "bottom": lows[idx], "bullish": False,
+                                    "touches": 0, "valid": True, "signaled": False})
                     if len(ob_list) > MAX_OB_KEEP: ob_list.pop(0)
                     break
             pending_pl = None
@@ -346,26 +349,100 @@ def analyze(candles):
             "sl": sig_sl, "tp": sig_tp, "rr": sig_rr, "trend": trend,
             "time": candles[-1]["time"] if candles else ""}
 
+# ==================== رسالة إشارة جديدة ====================
+def send_signal_message(trade):
+    direction = "Buy" if trade["type"] == "BUY" else "Sell"
+    msg = (
+        f"🥇 #XAUUSD | {direction} {trade['entry']:.2f}\n\n"
+        f"✅ Target : {trade['tp']:.2f}\n\n"
+        f"❕Stoploss : {trade['sl']:.2f}"
+    )
+    broadcast(msg)
+
+# ==================== متابعة الصفقة ====================
+def check_trade_result(active_trade, candles):
+    """يتابع الصفقة المفتوحة ويرجع النتيجة"""
+    if not active_trade or not candles:
+        return active_trade
+
+    is_buy  = active_trade["type"] == "BUY"
+    entry   = active_trade["entry"]
+    sl      = active_trade["sl"]
+    tp      = active_trade["tp"]
+    opened  = active_trade["open_time"]
+
+    # شوف آخر الشموع بعد وقت الدخول
+    for c in candles:
+        if c["time"] <= opened:
+            continue
+
+        if is_buy:
+            if c["low"] <= sl:
+                loss = sl - entry
+                broadcast(
+                    f"🥇 #XAUUSD | BUY ❌\n\n"
+                    f"Entry : {entry:.2f}\n"
+                    f"Stoploss Hit : {sl:.2f}\n"
+                    f"Loss : -{abs(loss):.2f}$"
+                )
+                print(f"❌ ستوب BUY @ {sl:.2f}")
+                return None
+
+            if c["high"] >= tp:
+                profit = tp - entry
+                broadcast(
+                    f"🥇 #XAUUSD | BUY ✅\n\n"
+                    f"Entry : {entry:.2f}\n"
+                    f"Target Hit : {tp:.2f}\n"
+                    f"Profit : +{profit:.2f}$"
+                )
+                print(f"✅ هدف BUY @ {tp:.2f}")
+                return None
+
+        else:  # SELL
+            if c["high"] >= sl:
+                loss = sl - entry
+                broadcast(
+                    f"🥇 #XAUUSD | SELL ❌\n\n"
+                    f"Entry : {entry:.2f}\n"
+                    f"Stoploss Hit : {sl:.2f}\n"
+                    f"Loss : -{abs(loss):.2f}$"
+                )
+                print(f"❌ ستوب SELL @ {sl:.2f}")
+                return None
+
+            if c["low"] <= tp:
+                profit = entry - tp
+                broadcast(
+                    f"🥇 #XAUUSD | SELL ✅\n\n"
+                    f"Entry : {entry:.2f}\n"
+                    f"Target Hit : {tp:.2f}\n"
+                    f"Profit : +{profit:.2f}$"
+                )
+                print(f"✅ هدف SELL @ {tp:.2f}")
+                return None
+
+    return active_trade  # الصفقة لسا مفتوحة
+
+# ==================== الحلقة الرئيسية ====================
 def main():
     broadcast(
-        "🤖 <b>SMC Gold Bot</b> شغّال!\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "📊 XAU/USD | M5\n"
+        "📊 <b>XAU/USD</b> | M5\n━━━━━━━━━━━━━━━━━━\n"
         "🌅 رسالة صباحية 08:00 AM\n"
-        "📰 تنبيهات أخبار USD\n"
-        "📈 إشارات SMC تلقائية\n"
-        "👥 /start للاشتراك\n"
-        "━━━━━━━━━━━━━━━━━━\n✅ جاهز!"
+        "📰 تنبيهات أخبار USD\n📈 إشارات تلقائية\n"
+        "✅ متابعة نتيجة كل صفقة\n"
+        "👥 /start للاشتراك\n━━━━━━━━━━━━━━━━━━\n✅ جاهز!"
     )
     print("✅ البوت شغّال - Yahoo Finance | XAUUSD M5")
 
-    offset = None
+    offset            = None
     last_signal_time  = ""
     morning_sent_date = ""
     news_sent_date    = ""
     news_alert_sent   = set()
     daily_news        = []
     last_candle_check = 0
+    active_trade      = None  # الصفقة المفتوحة الحالية
 
     while True:
         try:
@@ -391,55 +468,48 @@ def main():
                         broadcast(
                             f"🚨 <b>تحذير خبر قوي!</b>\n━━━━━━━━━━━━━━━━━━\n"
                             f"🔴 {news['title']}\n⏰ {news['time_str']} بتوقيت غزة\n"
-                            f"━━━━━━━━━━━━━━━━━━\n⛔ لا تفتح صفقات!\n"
-                            f"⏳ انتظر 15د بعد الخبر\n🤖 SMC Gold Bot")
+                            f"━━━━━━━━━━━━━━━━━━\n⛔ لا تفتح صفقات!")
                     if -16 <= diff <= -15 and key+"_post" not in news_alert_sent:
                         news_alert_sent.add(key+"_post")
                         broadcast(
                             f"✅ <b>انتهى وقت الخبر</b>\n━━━━━━━━━━━━━━━━━━\n"
                             f"📰 {news['title']} | {news['time_str']}\n"
-                            f"━━━━━━━━━━━━━━━━━━\n🟢 يمكن التداول بحذر\n🤖 SMC Gold Bot")
+                            f"━━━━━━━━━━━━━━━━━━\n🟢 يمكن التداول بحذر")
 
             now_ts = time.time()
             if now_ts - last_candle_check >= 300:
                 last_candle_check = now_ts
-                in_news, news_obj = is_high_impact_news_time(daily_news)
                 candles = get_candles()
+
                 if candles:
-                    result = analyze(candles)
-                    current_time = result["time"]
-                    if (result["buy"] or result["sell"]) and current_time != last_signal_time:
-                        last_signal_time = current_time
-                        direction = "🟢 شراء (BUY)" if result["buy"] else "🔴 بيع (SELL)"
-                        emoji = "📈" if result["buy"] else "📉"
-                        if in_news:
-                            broadcast(
-                                f"⚠️ <b>إشارة موجودة لكن لا ندخل!</b>\n━━━━━━━━━━━━━━━━━━\n"
-                                f"{emoji} {direction}\n━━━━━━━━━━━━━━━━━━\n"
-                                f"🚨 خبر قوي: {news_obj['title']}\n"
-                                f"⏰ {news_obj['time_str']} بتوقيت غزة\n🤖 SMC Gold Bot")
-                        else:
-                            broadcast(
-                                f"{emoji} <b>إشارة SMC جديدة!</b>\n━━━━━━━━━━━━━━━━━━\n"
-                                f"الزوج:   <b>XAU/USD</b>\n"
-                                f"الفريم:  <b>M5</b>\n"
-                                f"الاتجاه: <b>{direction}</b>\n"
-                                f"━━━━━━━━━━━━━━━━━━\n"
-                                f"💰 دخول:  <b>{result['entry']:.2f}</b>\n"
-                                f"🛑 ستوب:  <b>{result['sl']:.2f}</b>\n"
-                                f"🎯 هدف:   <b>{result['tp']:.2f}</b>\n"
-                                f"📊 R:R =  <b>1:{result['rr']:.1f}</b>\n"
-                                f"━━━━━━━━━━━━━━━━━━\n"
-                                f"🕐 {current_time}\n🤖 SMC Gold Bot")
-                        print(f"✅ إشارة: {direction} @ {result['entry']:.2f}")
-                    else:
-                        trend_txt = "صاعد 📈" if result["trend"]==1 else ("هابط 📉" if result["trend"]==-1 else "محايد")
-                        print(f"[{now_gaza.strftime('%H:%M:%S')}] {trend_txt} | {candles[-1]['close']:.2f}")
+                    # تحديث حالة الصفقة المفتوحة إن وجدت (تحقق ستوب/هدف)
+                    if active_trade:
+                        active_trade = check_trade_result(active_trade, candles)
+
+                    # دور على إشارة جديدة فقط إذا ما في صفقة مفتوحة حالياً
+                    if not active_trade:
+                        news_block, _ = is_high_impact_news_time(daily_news)
+                        if not news_block:
+                            result = analyze(candles)
+                            if (result["buy"] or result["sell"]) and result["time"] != last_signal_time:
+                                trade_type = "BUY" if result["buy"] else "SELL"
+                                active_trade = {
+                                    "type": trade_type,
+                                    "entry": result["entry"],
+                                    "sl": result["sl"],
+                                    "tp": result["tp"],
+                                    "rr": result["rr"],
+                                    "open_time": result["time"],
+                                }
+                                send_signal_message(active_trade)
+                                last_signal_time = result["time"]
+
+            time.sleep(5)
 
         except Exception as e:
-            print(f"❌ خطأ: {e}")
+            print(f"❌ خطأ رئيسي: {e}")
+            time.sleep(10)
 
-        time.sleep(2)
 
 if __name__ == "__main__":
     main()
