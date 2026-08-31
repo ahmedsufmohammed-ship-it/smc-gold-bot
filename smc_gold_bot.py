@@ -9,13 +9,7 @@ import pytz
 TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
 BROADCASTER_ID = "6360489611"
-
-# مكان تخزين الملفات - لو ضفت Volume على ريلوي، هو بحط متغير
-# RAILWAY_VOLUME_MOUNT_PATH تلقائياً والكود بياخده لحاله (بدون أي خطوة إضافية).
-# بديل يدوي: تقدر تحط متغير DATA_DIR بنفسك لو حبيت مسار مختلف.
-DATA_DIR = os.environ.get("DATA_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
-os.makedirs(DATA_DIR, exist_ok=True)
-MEMBERS_FILE = os.path.join(DATA_DIR, "members.json")
+MEMBERS_FILE   = "members.json"
 
 SWING_LEN      = 10
 OB_LOOKBACK    = 60
@@ -26,8 +20,6 @@ MIN_RR         = 2.0
 USE_WICK_TOUCH = True
 REQUIRE_IDM    = False
 GAZA_TZ        = pytz.timezone("Asia/Gaza")
-CANDLES_FILE   = os.path.join(DATA_DIR, "candles.json")
-MAX_CANDLES_KEEP = 300  # يعادل ~25 ساعة من شموع M5
 
 # ==================== الأعضاء ====================
 def load_members():
@@ -100,7 +92,7 @@ def handle_member_message(chat_id, text, first_name):
             members = load_members()
             send_telegram(
                 f"🎉 <b>أهلاً {first_name}!</b>\n━━━━━━━━━━━━━━━━━━\n"
-                f"تم تفعيل اشتراكك ✅\n"
+                f"تم اشتراكك في <b>SMC Gold Bot</b> ✅\n"
                 f"📊 XAU/USD | M5\n📈 إشارات شراء/بيع\n"
                 f"📰 تنبيهات أخبار USD\n🌅 رسالة صباحية\n"
                 f"للإلغاء: /stop", chat_id)
@@ -143,50 +135,37 @@ def process_updates(offset):
             pass
     return offset
 
-# ==================== سعر الذهب (مجاني بالكامل، بدون تسجيل ولا مفتاح) ====================
-# goldprice.org بيرجع سعر السبوت اللحظي الحقيقي (نفس نوع السعر يلي عالميتاتريدر)
-# بدون أي تسجيل. ما عندها تاريخ شموع جاهز، فالبوت نفسه بيبني شمعة كل 5 دقايق
-# من الأسعار اللحظية ويخزنها بملف عشان تضل موجودة بعد أي إعادة تشغيل.
-def get_spot_price():
+# ==================== بيانات الذهب ====================
+def get_candles():
     try:
-        r = requests.get("https://data-asg.goldprice.org/dbXRates/USD",
-                          headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        items = r.json().get("items", [])
-        if items:
-            return float(items[0]["xauPrice"])
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(
+            "https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
+            params={"interval": "5m", "range": "5d"},
+            headers=headers, timeout=20)
+        data = r.json()
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            print("⚠️ Yahoo: لا بيانات")
+            return None
+        ts    = result[0]["timestamp"]
+        ohlcv = result[0]["indicators"]["quote"][0]
+        opens  = ohlcv.get("open", [])
+        highs  = ohlcv.get("high", [])
+        lows   = ohlcv.get("low", [])
+        closes = ohlcv.get("close", [])
+        candles = []
+        for i in range(len(ts)):
+            if opens[i] is None or closes[i] is None: continue
+            dt = datetime.fromtimestamp(ts[i], tz=GAZA_TZ).strftime("%Y-%m-%d %H:%M")
+            candles.append({"time": dt, "open": float(opens[i]),
+                            "high": float(highs[i]), "low": float(lows[i]),
+                            "close": float(closes[i])})
+        print(f"✅ Yahoo: {len(candles)} شمعة | {candles[-1]['close']:.2f}")
+        return candles if len(candles) >= 50 else None
     except Exception as e:
-        print(f"⚠️ goldprice.org: {e}")
-
-    # احتياطي بسيط إذا تعطل المصدر الأساسي مؤقتاً (سعر لحظي بس، مو تاريخ)
-    try:
-        r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
-                          headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        price = r.json()["chart"]["result"][0]["meta"]["regularMarketPrice"]
-        return float(price)
-    except Exception as e:
-        print(f"❌ فشل جلب السعر من أي مصدر: {e}")
+        print(f"❌ Yahoo: {e}")
         return None
-
-def bucket_key(dt):
-    """يرجع بداية شمعة الـ 5 دقايق يلي بيقع فيها الوقت المعطى"""
-    floored = (dt.minute // 5) * 5
-    return dt.replace(minute=floored, second=0, microsecond=0)
-
-def load_candles():
-    if os.path.exists(CANDLES_FILE):
-        try:
-            with open(CANDLES_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
-
-def save_candles(candles):
-    try:
-        with open(CANDLES_FILE, "w") as f:
-            json.dump(candles[-MAX_CANDLES_KEEP:], f)
-    except Exception:
-        pass
 
 # ==================== أخبار ====================
 def get_usd_news():
@@ -231,39 +210,35 @@ def send_news_message(news_list):
     if not news_list: return
     high   = [n for n in news_list if n["impact"] == "high"]
     medium = [n for n in news_list if n["impact"] == "medium"]
-    low    = [n for n in news_list if n["impact"] == "low"]
-    msg = "📰 <b>أخبار USD اليوم</b>\n━━━━━━━━━━━━━━━━━━\n🕐 <i>بتوقيت غزة</i>\n\n"
+    msg = "👁️\n\n📰 USD News Today (Gaza Time)\n\n"
     if high:
-        msg += "🔴 <b>قوية — ابتعد:</b>\n"
+        msg += "🔴 High Impact — Avoid trading:\n"
         for n in high: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
         msg += "\n"
     if medium:
-        msg += "🟡 <b>متوسطة — انتبه:</b>\n"
+        msg += "🟡 Medium Impact — Stay cautious:\n"
         for n in medium: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
         msg += "\n"
-    if low:
-        msg += "🟢 <b>ضعيفة:</b>\n"
-        for n in low: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
-        msg += "\n"
-    msg += "━━━━━━━━━━━━━━━━━━\n⚠️ لا تتداول 15د قبل وبعد القوية"
+    msg += "⚠️ Avoid trading 15 minutes before & after high impact news."
     broadcast(msg)
 
 def send_morning_message(news_list):
     now = datetime.now(GAZA_TZ)
-    day_ar = ["الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت","الأحد"][now.weekday()]
+    days_en = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+    day_en  = days_en[now.weekday()]
     high_news = [n for n in news_list if n["impact"] == "high"]
     news_warn = ""
     if high_news:
-        news_warn = "\n⚠️ <b>يوم فيه أخبار قوية!</b>\n"
-        for n in high_news: news_warn += f"   🔴 {n['time_str']} | {n['title']}\n"
+        news_warn = "\n\n⚠️ High Impact News Today:\n"
+        for n in high_news: news_warn += f"🔴 {n['time_str']} | {n['title']}\n"
     broadcast(
-        f"🌅 <b>Good Morning Traders!</b> ☀️\n━━━━━━━━━━━━━━━━━━\n"
-        f"📅 {now.strftime(f'{day_ar} %d/%m/%Y')}\n━━━━━━━━━━━━━━━━━━\n"
-        f"📊 XAU/USD | M5\n{news_warn}\n"
-        f"🔍 <b>خطة اليوم:</b>\n• راقب الأوردر بلوك\n"
-        f"• انتظر BOS أو CHOCH\n• لا تدخل بدون إشارة\n\n"
-        f"💡 الصبر أهم من الصفقات!\n━━━━━━━━━━━━━━━━━━\n"
-        f"بالتوفيق للجميع 🌟")
+        f"👁️\n\n"
+        f"🌅 Good Morning Traders!\n"
+        f"📅 {day_en} — {now.strftime('%d/%m/%Y')}"
+        f"{news_warn}\n\n"
+        f"🔍 Focus on clean setups only.\n"
+        f"💡 Patience is the key — let the market come to you."
+    )
 
 # ==================== Pivot ====================
 def pivot_high(highs, i, length):
@@ -366,16 +341,6 @@ def analyze(candles):
             "sl": sig_sl, "tp": sig_tp, "rr": sig_rr, "trend": trend,
             "time": candles[-1]["time"] if candles else ""}
 
-# ==================== رسالة إشارة جديدة ====================
-def send_signal_message(trade):
-    direction = "Buy" if trade["type"] == "BUY" else "Sell"
-    msg = (
-        f"🥇 #XAUUSD | {direction} {trade['entry']:.2f}\n\n"
-        f"✅ Target : {trade['tp']:.2f}\n\n"
-        f"❕Stoploss : {trade['sl']:.2f}"
-    )
-    broadcast(msg)
-
 # ==================== متابعة الصفقة ====================
 def check_trade_result(active_trade, candles):
     """يتابع الصفقة المفتوحة ويرجع النتيجة"""
@@ -395,46 +360,54 @@ def check_trade_result(active_trade, candles):
 
         if is_buy:
             if c["low"] <= sl:
+                # ستوب
                 loss = sl - entry
                 broadcast(
-                    f"🥇 #XAUUSD | BUY ❌\n\n"
-                    f"Entry : {entry:.2f}\n"
-                    f"Stoploss Hit : {sl:.2f}\n"
-                    f"Loss : -{abs(loss):.2f}$"
+                    f"👁️\n\n"
+                    f"🛑 Stoploss Hit.\n\n"
+                    f"🥇 #XAUUSD | BUY\n"
+                    f"Entry: {entry:.2f} | SL: {sl:.2f}\n\n"
+                    f"💪 Losses are part of the game.\n"
+                    f"Stay disciplined — the next setup will be better."
                 )
                 print(f"❌ ستوب BUY @ {sl:.2f}")
                 return None
 
             if c["high"] >= tp:
+                # هدف
                 profit = tp - entry
                 broadcast(
-                    f"🥇 #XAUUSD | BUY ✅\n\n"
-                    f"Entry : {entry:.2f}\n"
-                    f"Target Hit : {tp:.2f}\n"
-                    f"Profit : +{profit:.2f}$"
+                    f"👁️\n\n"
+                    f"♥️ Target Hit! 🎯\n\n"
+                    f"🥇 #XAUUSD | BUY\n"
+                    f"✅ Entry: {entry:.2f} → Target: {tp:.2f}\n\n"
+                    f"🔥 Everyone in profit!\n"
+                    f"💰 Well done for staying patient."
                 )
                 print(f"✅ هدف BUY @ {tp:.2f}")
                 return None
 
         else:  # SELL
             if c["high"] >= sl:
-                loss = sl - entry
                 broadcast(
-                    f"🥇 #XAUUSD | SELL ❌\n\n"
-                    f"Entry : {entry:.2f}\n"
-                    f"Stoploss Hit : {sl:.2f}\n"
-                    f"Loss : -{abs(loss):.2f}$"
+                    f"👁️\n\n"
+                    f"🛑 Stoploss Hit.\n\n"
+                    f"🥇 #XAUUSD | SELL\n"
+                    f"Entry: {entry:.2f} | SL: {sl:.2f}\n\n"
+                    f"💪 Losses are part of the game.\n"
+                    f"Stay disciplined — the next setup will be better."
                 )
                 print(f"❌ ستوب SELL @ {sl:.2f}")
                 return None
 
             if c["low"] <= tp:
-                profit = entry - tp
                 broadcast(
-                    f"🥇 #XAUUSD | SELL ✅\n\n"
-                    f"Entry : {entry:.2f}\n"
-                    f"Target Hit : {tp:.2f}\n"
-                    f"Profit : +{profit:.2f}$"
+                    f"👁️\n\n"
+                    f"♥️ Target Hit! 🎯\n\n"
+                    f"🥇 #XAUUSD | SELL\n"
+                    f"✅ Entry: {entry:.2f} → Target: {tp:.2f}\n\n"
+                    f"🔥 Everyone in profit!\n"
+                    f"💰 Well done for staying patient."
                 )
                 print(f"✅ هدف SELL @ {tp:.2f}")
                 return None
@@ -443,14 +416,8 @@ def check_trade_result(active_trade, candles):
 
 # ==================== الحلقة الرئيسية ====================
 def main():
-    broadcast(
-        "📊 <b>XAU/USD</b> | M5\n━━━━━━━━━━━━━━━━━━\n"
-        "🌅 رسالة صباحية 08:00 AM\n"
-        "📰 تنبيهات أخبار USD\n📈 إشارات تلقائية\n"
-        "✅ متابعة نتيجة كل صفقة\n"
-        "👥 /start للاشتراك\n━━━━━━━━━━━━━━━━━━\n✅ جاهز!"
-    )
-    print("✅ البوت شغّال - goldprice.org | XAUUSD سبوت M5")
+    broadcast("👁️\n\n✅ Bot is now active and monitoring the market!\n📊 #XAUUSD | M5")
+    print("✅ البوت شغّال - Yahoo Finance | XAUUSD M5")
 
     offset            = None
     last_signal_time  = ""
@@ -458,14 +425,8 @@ def main():
     news_sent_date    = ""
     news_alert_sent   = set()
     daily_news        = []
+    last_candle_check = 0
     active_trade      = None  # الصفقة المفتوحة الحالية
-
-    candle_history = load_candles()   # شموع مقفولة (محفوظة من قبل إن وجدت)
-    current_bucket = None             # مفتاح شمعة الـ5 دقايق الحالية
-    current_candle = None             # الشمعة يلي لسا عم تتبنى
-
-    if candle_history:
-        print(f"📦 استرجعت {len(candle_history)} شمعة محفوظة")
 
     while True:
         try:
@@ -489,70 +450,79 @@ def main():
                     if 14 <= diff <= 15 and key+"_pre" not in news_alert_sent:
                         news_alert_sent.add(key+"_pre")
                         broadcast(
-                            f"🚨 <b>تحذير خبر قوي!</b>\n━━━━━━━━━━━━━━━━━━\n"
-                            f"🔴 {news['title']}\n⏰ {news['time_str']} بتوقيت غزة\n"
-                            f"━━━━━━━━━━━━━━━━━━\n⛔ لا تفتح صفقات!")
+                            f"👁️\n\n"
+                            f"⚠️ High Impact News in 15 minutes!\n\n"
+                            f"🔴 {news['title']}\n"
+                            f"⏰ {news['time_str']} Gaza Time\n\n"
+                            f"🚫 Do NOT open any trades now.\n"
+                            f"Wait 15 minutes after the release.")
                     if -16 <= diff <= -15 and key+"_post" not in news_alert_sent:
                         news_alert_sent.add(key+"_post")
                         broadcast(
-                            f"✅ <b>انتهى وقت الخبر</b>\n━━━━━━━━━━━━━━━━━━\n"
-                            f"📰 {news['title']} | {news['time_str']}\n"
-                            f"━━━━━━━━━━━━━━━━━━\n🟢 يمكن التداول بحذر")
+                            f"👁️\n\n"
+                            f"✅ News is over — Market is settling.\n\n"
+                            f"📰 {news['title']} | {news['time_str']}\n\n"
+                            f"🟢 You may look for setups — but stay cautious.")
 
-            # ------- سحب السعر اللحظي وبناء/تحديث شمعة الـ5 دقايق -------
-            price = get_spot_price()
-            if price is not None:
-                bkey_str = bucket_key(now_gaza).strftime("%Y-%m-%d %H:%M")
-                candle_closed = False
+            now_ts = time.time()
+            if now_ts - last_candle_check >= 300:
+                last_candle_check = now_ts
+                candles = get_candles()
 
-                if current_candle is None:
-                    current_candle = {"time": bkey_str, "open": price, "high": price, "low": price, "close": price}
-                    current_bucket = bkey_str
-                elif bkey_str == current_bucket:
-                    current_candle["high"]  = max(current_candle["high"], price)
-                    current_candle["low"]   = min(current_candle["low"], price)
-                    current_candle["close"] = price
-                else:
-                    candle_history.append(current_candle)
-                    candle_history = candle_history[-MAX_CANDLES_KEEP:]
-                    save_candles(candle_history)
-                    closed = candle_history[-1]
-                    print(f"🕯️ {closed['time']} | O:{closed['open']:.2f} H:{closed['high']:.2f} "
-                          f"L:{closed['low']:.2f} C:{closed['close']:.2f} | إجمالي {len(candle_history)} شمعة")
-                    current_candle = {"time": bkey_str, "open": price, "high": price, "low": price, "close": price}
-                    current_bucket = bkey_str
-                    candle_closed = True
+                if candles:
+                    # متابعة الصفقة المفتوحة
+                    if active_trade:
+                        active_trade = check_trade_result(active_trade, candles)
 
-                live_candles = candle_history + [current_candle]
+                    # البحث عن إشارة جديدة لو ما في صفقة مفتوحة
+                    if not active_trade:
+                        in_news, news_obj = is_high_impact_news_time(daily_news)
+                        result = analyze(candles)
+                        current_time = result["time"]
 
-                # تحديث حالة الصفقة المفتوحة إن وجدت (فحص لحظي كل ~5 ثواني)
-                if active_trade:
-                    active_trade = check_trade_result(active_trade, live_candles)
+                        if (result["buy"] or result["sell"]) and current_time != last_signal_time:
+                            last_signal_time = current_time
+                            direction = "🟢 شراء (BUY)" if result["buy"] else "🔴 بيع (SELL)"
+                            emoji = "📈" if result["buy"] else "📉"
 
-                # دور على إشارة جديدة بس لما تقفل شمعة جديدة، وإذا ما في صفقة مفتوحة
-                if candle_closed and not active_trade and len(candle_history) >= 50:
-                    news_block, _ = is_high_impact_news_time(daily_news)
-                    if not news_block:
-                        result = analyze(live_candles)
-                        if (result["buy"] or result["sell"]) and result["time"] != last_signal_time:
-                            trade_type = "BUY" if result["buy"] else "SELL"
-                            active_trade = {
-                                "type": trade_type,
-                                "entry": result["entry"],
-                                "sl": result["sl"],
-                                "tp": result["tp"],
-                                "rr": result["rr"],
-                                "open_time": result["time"],
-                            }
-                            send_signal_message(active_trade)
-                            last_signal_time = result["time"]
+                            if in_news:
+                                broadcast(
+                                    f"👁️\n\n"
+                                    f"⚠️ Setup detected but we will NOT enter.\n\n"
+                                    f"🔴 High Impact News active: {news_obj['title']}\n"
+                                    f"⏰ {news_obj['time_str']} Gaza Time\n\n"
+                                    f"🙌 Sometimes avoiding a trade is also a profit.")
+                            else:
+                                tp1 = result['entry'] + (result['tp'] - result['entry']) * 0.33 if result['buy'] else result['entry'] - (result['entry'] - result['tp']) * 0.33
+                                tp2 = result['entry'] + (result['tp'] - result['entry']) * 0.66 if result['buy'] else result['entry'] - (result['entry'] - result['tp']) * 0.66
+                                tp3 = result['tp']
+                                side = "Buy Limit" if result['buy'] else "Sell Limit"
+                                broadcast(
+                                    f"👁️\n\n"
+                                    f"🥇 #XAUUSD | {side} {result['entry']:.2f}\n\n"
+                                    f"✅ Target 1 : {tp1:.2f} | Target 2 : {tp2:.2f} | Target 3 : {tp3:.2f}\n\n"
+                                    f"❕Stoploss : {result['sl']:.2f}"
+                                )
 
-            time.sleep(5)
+                                # حفظ الصفقة لمتابعتها
+                                active_trade = {
+                                    "type"     : "BUY" if result["buy"] else "SELL",
+                                    "entry"    : result["entry"],
+                                    "sl"       : result["sl"],
+                                    "tp"       : result["tp"],
+                                    "rr"       : result["rr"],
+                                    "open_time": current_time
+                                }
+                                print(f"✅ إشارة: {direction} @ {result['entry']:.2f}")
+
+                    trend_txt = "صاعد 📈" if candles[-1]["close"] > candles[-2]["close"] else "هابط 📉"
+                    trade_status = f"| صفقة مفتوحة: {active_trade['type']}" if active_trade else ""
+                    print(f"[{now_gaza.strftime('%H:%M:%S')}] {trend_txt} | {candles[-1]['close']:.2f} {trade_status}")
 
         except Exception as e:
-            print(f"❌ خطأ رئيسي: {e}")
-            time.sleep(10)
+            print(f"❌ خطأ: {e}")
 
+        time.sleep(2)
 
 if __name__ == "__main__":
     main()
