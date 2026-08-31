@@ -136,35 +136,41 @@ def process_updates(offset):
     return offset
 
 # ==================== بيانات الذهب ====================
+def get_spot_price():
+    return None
+
 def get_candles():
+    """جيب الشموع من Twelve Data - سعر فوري حقيقي مثل MT5"""
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(
-            "https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
-            params={"interval": "5m", "range": "5d"},
-            headers=headers, timeout=20)
+            "https://api.twelvedata.com/time_series",
+            params={
+                "symbol"    : "XAU/USD",
+                "interval"  : "5min",
+                "outputsize": 200,
+                "apikey"    : "0cef5bb56a314b6289f3db0b648f84b5"
+            }, timeout=20)
         data = r.json()
-        result = data.get("chart", {}).get("result", [])
-        if not result:
-            print("⚠️ Yahoo: لا بيانات")
+
+        if "values" not in data:
+            msg = data.get("message") or data.get("Note") or "لا بيانات"
+            print(f"⚠️ Twelve Data: {msg}")
             return None
-        ts    = result[0]["timestamp"]
-        ohlcv = result[0]["indicators"]["quote"][0]
-        opens  = ohlcv.get("open", [])
-        highs  = ohlcv.get("high", [])
-        lows   = ohlcv.get("low", [])
-        closes = ohlcv.get("close", [])
+
         candles = []
-        for i in range(len(ts)):
-            if opens[i] is None or closes[i] is None: continue
-            dt = datetime.fromtimestamp(ts[i], tz=GAZA_TZ).strftime("%Y-%m-%d %H:%M")
-            candles.append({"time": dt, "open": float(opens[i]),
-                            "high": float(highs[i]), "low": float(lows[i]),
-                            "close": float(closes[i])})
-        print(f"✅ Yahoo: {len(candles)} شمعة | {candles[-1]['close']:.2f}")
+        for v in reversed(data["values"]):
+            candles.append({
+                "time" : v["datetime"],
+                "open" : float(v["open"]),
+                "high" : float(v["high"]),
+                "low"  : float(v["low"]),
+                "close": float(v["close"])
+            })
+
+        print(f"✅ Twelve Data: {len(candles)} شمعة | {candles[-1]['close']:.2f}")
         return candles if len(candles) >= 50 else None
     except Exception as e:
-        print(f"❌ Yahoo: {e}")
+        print(f"❌ Twelve Data: {e}")
         return None
 
 # ==================== أخبار ====================
