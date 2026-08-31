@@ -136,40 +136,50 @@ def process_updates(offset):
     return offset
 
 # ==================== بيانات الذهب ====================
+# رموز محتملة لسعر الذهب سبوت (نفس نوع السعر يلي عالميتاتريدر) - بيجرب كل واحد
+# لحد ما يلقى وحد شغال عند ياهو، وآخر خيار GC=F (عقود مستقبلية) كحل احتياطي
+# بس ضامن إنه دايماً في بيانات حتى لو الرموز التانية توقفت
+GOLD_TICKERS = ["XAUUSD=X", "XAU=X", "GC=F"]
+
 def get_candles():
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(
-            "https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X",
-            params={"interval": "5m", "range": "5d"},
-            headers=headers, timeout=20)
-        data = r.json()
-        result = data.get("chart", {}).get("result", [])
-        if not result:
-            print("⚠️ Yahoo: لا بيانات")
-            return None
-        ts    = result[0]["timestamp"]
-        ohlcv = result[0]["indicators"]["quote"][0]
-        opens  = ohlcv.get("open", [])
-        highs  = ohlcv.get("high", [])
-        lows   = ohlcv.get("low", [])
-        closes = ohlcv.get("close", [])
-        candles = []
-        for i in range(len(ts)):
-            if opens[i] is None or closes[i] is None: continue
-            dt = datetime.fromtimestamp(ts[i], tz=GAZA_TZ).strftime("%Y-%m-%d %H:%M")
-            candles.append({
-                "time": dt,
-                "open":  float(opens[i]),
-                "high":  float(highs[i]),
-                "low":   float(lows[i]),
-                "close": float(closes[i]),
-            })
-        print(f"✅ Yahoo: {len(candles)} شمعة | {candles[-1]['close']:.2f}")
-        return candles if len(candles) >= 50 else None
-    except Exception as e:
-        print(f"❌ Yahoo: {e}")
-        return None
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for symbol in GOLD_TICKERS:
+        try:
+            r = requests.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                params={"interval": "5m", "range": "5d"},
+                headers=headers, timeout=20)
+            data = r.json()
+            result = data.get("chart", {}).get("result", [])
+            if not result:
+                print(f"⚠️ {symbol}: لا بيانات، بجرب رمز تاني")
+                continue
+            ts    = result[0]["timestamp"]
+            ohlcv = result[0]["indicators"]["quote"][0]
+            opens  = ohlcv.get("open", [])
+            highs  = ohlcv.get("high", [])
+            lows   = ohlcv.get("low", [])
+            closes = ohlcv.get("close", [])
+            candles = []
+            for i in range(len(ts)):
+                if opens[i] is None or closes[i] is None: continue
+                dt = datetime.fromtimestamp(ts[i], tz=GAZA_TZ).strftime("%Y-%m-%d %H:%M")
+                candles.append({
+                    "time": dt,
+                    "open":  float(opens[i]),
+                    "high":  float(highs[i]),
+                    "low":   float(lows[i]),
+                    "close": float(closes[i]),
+                })
+            if len(candles) < 50:
+                print(f"⚠️ {symbol}: بيانات ناقصة، بجرب رمز تاني")
+                continue
+            print(f"✅ {symbol}: {len(candles)} شمعة | {candles[-1]['close']:.2f}")
+            return candles
+        except Exception as e:
+            print(f"❌ {symbol}: {e}")
+    print("❌ فشل جلب السعر من كل الرموز")
+    return None
 
 # ==================== أخبار ====================
 def get_usd_news():
