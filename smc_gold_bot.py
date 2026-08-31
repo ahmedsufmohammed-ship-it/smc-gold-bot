@@ -7,7 +7,7 @@ from datetime import datetime
 from xml.etree import ElementTree as ET
 import pytz
 
-TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
+TELEGRAM_TOKEN = "8800189995:AAEWA3PQ1JuaRmTjeQb9V4IL-QU4nnlH2Bs"
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
 BROADCASTER_ID = "6360489611"
 MEMBERS_FILE   = "members.json"
