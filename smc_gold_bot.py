@@ -9,7 +9,13 @@ import pytz
 TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
 BROADCASTER_ID = "6360489611"
-MEMBERS_FILE   = "members.json"
+
+# مكان تخزين الملفات - لو ضفت Volume على ريلوي وحطيت متغير بيئة DATA_DIR
+# (مثلاً /data)، البيانات (الأعضاء والشموع) بتضل محفوظة حتى بعد أي Redeploy.
+# لو ما ضفته، بتتخزن بمجلد المشروع العادي (بينمسح مع كل Redeploy).
+DATA_DIR = os.environ.get("DATA_DIR", ".")
+os.makedirs(DATA_DIR, exist_ok=True)
+MEMBERS_FILE = os.path.join(DATA_DIR, "members.json")
 
 SWING_LEN      = 10
 OB_LOOKBACK    = 60
@@ -20,6 +26,8 @@ MIN_RR         = 2.0
 USE_WICK_TOUCH = True
 REQUIRE_IDM    = False
 GAZA_TZ        = pytz.timezone("Asia/Gaza")
+CANDLES_FILE   = os.path.join(DATA_DIR, "candles.json")
+MAX_CANDLES_KEEP = 300  # يعادل ~25 ساعة من شموع M5
 
 # ==================== الأعضاء ====================
 def load_members():
@@ -135,51 +143,50 @@ def process_updates(offset):
             pass
     return offset
 
-# ==================== بيانات الذهب ====================
-# رموز محتملة لسعر الذهب سبوت (نفس نوع السعر يلي عالميتاتريدر) - بيجرب كل واحد
-# لحد ما يلقى وحد شغال عند ياهو، وآخر خيار GC=F (عقود مستقبلية) كحل احتياطي
-# بس ضامن إنه دايماً في بيانات حتى لو الرموز التانية توقفت
-GOLD_TICKERS = ["XAUUSD=X", "XAU=X", "GC=F"]
+# ==================== سعر الذهب (مجاني بالكامل، بدون تسجيل ولا مفتاح) ====================
+# goldprice.org بيرجع سعر السبوت اللحظي الحقيقي (نفس نوع السعر يلي عالميتاتريدر)
+# بدون أي تسجيل. ما عندها تاريخ شموع جاهز، فالبوت نفسه بيبني شمعة كل 5 دقايق
+# من الأسعار اللحظية ويخزنها بملف عشان تضل موجودة بعد أي إعادة تشغيل.
+def get_spot_price():
+    try:
+        r = requests.get("https://data-asg.goldprice.org/dbXRates/USD",
+                          headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        items = r.json().get("items", [])
+        if items:
+            return float(items[0]["xauPrice"])
+    except Exception as e:
+        print(f"⚠️ goldprice.org: {e}")
 
-def get_candles():
-    headers = {"User-Agent": "Mozilla/5.0"}
-    for symbol in GOLD_TICKERS:
+    # احتياطي بسيط إذا تعطل المصدر الأساسي مؤقتاً (سعر لحظي بس، مو تاريخ)
+    try:
+        r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F",
+                          headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        price = r.json()["chart"]["result"][0]["meta"]["regularMarketPrice"]
+        return float(price)
+    except Exception as e:
+        print(f"❌ فشل جلب السعر من أي مصدر: {e}")
+        return None
+
+def bucket_key(dt):
+    """يرجع بداية شمعة الـ 5 دقايق يلي بيقع فيها الوقت المعطى"""
+    floored = (dt.minute // 5) * 5
+    return dt.replace(minute=floored, second=0, microsecond=0)
+
+def load_candles():
+    if os.path.exists(CANDLES_FILE):
         try:
-            r = requests.get(
-                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
-                params={"interval": "5m", "range": "5d"},
-                headers=headers, timeout=20)
-            data = r.json()
-            result = data.get("chart", {}).get("result", [])
-            if not result:
-                print(f"⚠️ {symbol}: لا بيانات، بجرب رمز تاني")
-                continue
-            ts    = result[0]["timestamp"]
-            ohlcv = result[0]["indicators"]["quote"][0]
-            opens  = ohlcv.get("open", [])
-            highs  = ohlcv.get("high", [])
-            lows   = ohlcv.get("low", [])
-            closes = ohlcv.get("close", [])
-            candles = []
-            for i in range(len(ts)):
-                if opens[i] is None or closes[i] is None: continue
-                dt = datetime.fromtimestamp(ts[i], tz=GAZA_TZ).strftime("%Y-%m-%d %H:%M")
-                candles.append({
-                    "time": dt,
-                    "open":  float(opens[i]),
-                    "high":  float(highs[i]),
-                    "low":   float(lows[i]),
-                    "close": float(closes[i]),
-                })
-            if len(candles) < 50:
-                print(f"⚠️ {symbol}: بيانات ناقصة، بجرب رمز تاني")
-                continue
-            print(f"✅ {symbol}: {len(candles)} شمعة | {candles[-1]['close']:.2f}")
-            return candles
-        except Exception as e:
-            print(f"❌ {symbol}: {e}")
-    print("❌ فشل جلب السعر من كل الرموز")
-    return None
+            with open(CANDLES_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_candles(candles):
+    try:
+        with open(CANDLES_FILE, "w") as f:
+            json.dump(candles[-MAX_CANDLES_KEEP:], f)
+    except Exception:
+        pass
 
 # ==================== أخبار ====================
 def get_usd_news():
@@ -443,7 +450,7 @@ def main():
         "✅ متابعة نتيجة كل صفقة\n"
         "👥 /start للاشتراك\n━━━━━━━━━━━━━━━━━━\n✅ جاهز!"
     )
-    print("✅ البوت شغّال - Yahoo Finance | XAUUSD M5")
+    print("✅ البوت شغّال - goldprice.org | XAUUSD سبوت M5")
 
     offset            = None
     last_signal_time  = ""
@@ -451,8 +458,14 @@ def main():
     news_sent_date    = ""
     news_alert_sent   = set()
     daily_news        = []
-    last_candle_check = 0
     active_trade      = None  # الصفقة المفتوحة الحالية
+
+    candle_history = load_candles()   # شموع مقفولة (محفوظة من قبل إن وجدت)
+    current_bucket = None             # مفتاح شمعة الـ5 دقايق الحالية
+    current_candle = None             # الشمعة يلي لسا عم تتبنى
+
+    if candle_history:
+        print(f"📦 استرجعت {len(candle_history)} شمعة محفوظة")
 
     while True:
         try:
@@ -486,33 +499,50 @@ def main():
                             f"📰 {news['title']} | {news['time_str']}\n"
                             f"━━━━━━━━━━━━━━━━━━\n🟢 يمكن التداول بحذر")
 
-            now_ts = time.time()
-            if now_ts - last_candle_check >= 300:
-                last_candle_check = now_ts
-                candles = get_candles()
+            # ------- سحب السعر اللحظي وبناء/تحديث شمعة الـ5 دقايق -------
+            price = get_spot_price()
+            if price is not None:
+                bkey_str = bucket_key(now_gaza).strftime("%Y-%m-%d %H:%M")
+                candle_closed = False
 
-                if candles:
-                    # تحديث حالة الصفقة المفتوحة إن وجدت (تحقق ستوب/هدف)
-                    if active_trade:
-                        active_trade = check_trade_result(active_trade, candles)
+                if current_candle is None:
+                    current_candle = {"time": bkey_str, "open": price, "high": price, "low": price, "close": price}
+                    current_bucket = bkey_str
+                elif bkey_str == current_bucket:
+                    current_candle["high"]  = max(current_candle["high"], price)
+                    current_candle["low"]   = min(current_candle["low"], price)
+                    current_candle["close"] = price
+                else:
+                    candle_history.append(current_candle)
+                    candle_history = candle_history[-MAX_CANDLES_KEEP:]
+                    save_candles(candle_history)
+                    current_candle = {"time": bkey_str, "open": price, "high": price, "low": price, "close": price}
+                    current_bucket = bkey_str
+                    candle_closed = True
 
-                    # دور على إشارة جديدة فقط إذا ما في صفقة مفتوحة حالياً
-                    if not active_trade:
-                        news_block, _ = is_high_impact_news_time(daily_news)
-                        if not news_block:
-                            result = analyze(candles)
-                            if (result["buy"] or result["sell"]) and result["time"] != last_signal_time:
-                                trade_type = "BUY" if result["buy"] else "SELL"
-                                active_trade = {
-                                    "type": trade_type,
-                                    "entry": result["entry"],
-                                    "sl": result["sl"],
-                                    "tp": result["tp"],
-                                    "rr": result["rr"],
-                                    "open_time": result["time"],
-                                }
-                                send_signal_message(active_trade)
-                                last_signal_time = result["time"]
+                live_candles = candle_history + [current_candle]
+
+                # تحديث حالة الصفقة المفتوحة إن وجدت (فحص لحظي كل ~5 ثواني)
+                if active_trade:
+                    active_trade = check_trade_result(active_trade, live_candles)
+
+                # دور على إشارة جديدة بس لما تقفل شمعة جديدة، وإذا ما في صفقة مفتوحة
+                if candle_closed and not active_trade and len(candle_history) >= 50:
+                    news_block, _ = is_high_impact_news_time(daily_news)
+                    if not news_block:
+                        result = analyze(live_candles)
+                        if (result["buy"] or result["sell"]) and result["time"] != last_signal_time:
+                            trade_type = "BUY" if result["buy"] else "SELL"
+                            active_trade = {
+                                "type": trade_type,
+                                "entry": result["entry"],
+                                "sl": result["sl"],
+                                "tp": result["tp"],
+                                "rr": result["rr"],
+                                "open_time": result["time"],
+                            }
+                            send_signal_message(active_trade)
+                            last_signal_time = result["time"]
 
             time.sleep(5)
 
