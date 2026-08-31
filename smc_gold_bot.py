@@ -2,11 +2,12 @@ import requests
 import time
 import json
 import os
+import sys
 from datetime import datetime
 from xml.etree import ElementTree as ET
 import pytz
 
-TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "PUT_YOUR_TOKEN_HERE")
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
 BROADCASTER_ID = "6360489611"
 MEMBERS_FILE   = "members.json"
@@ -20,6 +21,34 @@ MIN_RR         = 2.0
 USE_WICK_TOUCH = True
 REQUIRE_IDM    = False
 GAZA_TZ        = pytz.timezone("Asia/Gaza")
+
+# حجم اللوت المستخدم لحساب الربح/الخسارة بالدولار (1 لوت = 100 أونصة ذهب)
+LOT_SIZE       = 0.01
+CONTRACT_SIZE  = 100  # أونصة لكل لوت قياسي
+
+# ==================== قفل النسخة الواحدة ====================
+LOCK_FILE = "/tmp/smc_bot.lock"
+
+def acquire_single_instance_lock():
+    """يمنع اشتغال أكثر من نسخة من البوت بنفس الوقت (سبب تكرار الرسائل)."""
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, "r") as f:
+                old_pid = f.read().strip()
+            if old_pid and os.path.exists(f"/proc/{old_pid}"):
+                print(f"⚠️ في نسخة شغالة أصلاً (PID {old_pid}). ما رح أشغّل نسخة ثانية.")
+                sys.exit(0)
+        except Exception:
+            pass
+    with open(LOCK_FILE, "w") as f:
+        f.write(str(os.getpid()))
+
+def release_single_instance_lock():
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+    except Exception:
+        pass
 
 # ==================== الأعضاء ====================
 def load_members():
@@ -58,7 +87,7 @@ def send_telegram(msg, chat_id=None):
     for cid in targets:
         try:
             requests.post(url, data={"chat_id": cid, "text": msg, "parse_mode": "HTML"}, timeout=10)
-        except:
+        except Exception:
             pass
 
 def broadcast(msg):
@@ -115,7 +144,7 @@ def get_updates(offset=None):
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates",
             params={"timeout": 30, "offset": offset}, timeout=35)
         return r.json().get("result", [])
-    except:
+    except Exception:
         return []
 
 def process_updates(offset):
@@ -126,19 +155,17 @@ def process_updates(offset):
             chat_id = msg.get("chat", {}).get("id")
             text    = msg.get("text", "").strip()
             first   = msg.get("from", {}).get("first_name", "")
-            if not chat_id or not text: continue
+            if not chat_id or not text:
+                continue
             if str(chat_id) in ADMIN_IDS:
                 handle_admin_message(chat_id, text, first)
             else:
                 handle_member_message(chat_id, text, first)
-        except:
+        except Exception:
             pass
     return offset
 
 # ==================== بيانات الذهب ====================
-def get_spot_price():
-    return None
-
 def get_candles():
     """جيب الشموع من Twelve Data - سعر فوري حقيقي مثل MT5"""
     try:
@@ -148,7 +175,7 @@ def get_candles():
                 "symbol"    : "XAU/USD",
                 "interval"  : "5min",
                 "outputsize": 200,
-                "apikey"    : "0cef5bb56a314b6289f3db0b648f84b5"
+                "apikey"    : os.environ.get("TWELVEDATA_API_KEY", "PUT_YOUR_API_KEY_HERE")
             }, timeout=20)
         data = r.json()
 
@@ -182,22 +209,26 @@ def get_usd_news():
         today = datetime.now(GAZA_TZ).date()
         for event in root.findall("event"):
             try:
-                if event.findtext("country","").upper() != "USD": continue
-                title  = event.findtext("title","")
-                impact = event.findtext("impact","").lower()
-                d_str  = event.findtext("date","")
-                t_str  = event.findtext("time","")
-                if not d_str or not t_str: continue
+                if event.findtext("country", "").upper() != "USD":
+                    continue
+                title  = event.findtext("title", "")
+                impact = event.findtext("impact", "").lower()
+                d_str  = event.findtext("date", "")
+                t_str  = event.findtext("time", "")
+                if not d_str or not t_str:
+                    continue
                 try:
                     dt_utc = datetime.strptime(f"{d_str} {t_str}", "%m-%d-%Y %I:%M%p")
-                except:
+                except Exception:
                     dt_utc = datetime.strptime(f"{d_str} {t_str}", "%m-%d-%Y %I:%M %p")
                 dt_gaza = pytz.utc.localize(dt_utc).astimezone(GAZA_TZ)
-                if dt_gaza.date() != today: continue
-                if impact in ["high","medium","low"]:
+                if dt_gaza.date() != today:
+                    continue
+                if impact in ["high", "medium", "low"]:
                     news_list.append({"title": title, "impact": impact,
-                                      "time": dt_gaza, "time_str": dt_gaza.strftime("%I:%M %p")})
-            except: continue
+                                       "time": dt_gaza, "time_str": dt_gaza.strftime("%I:%M %p")})
+            except Exception:
+                continue
         return sorted(news_list, key=lambda x: x["time"])
     except Exception as e:
         print(f"خطأ أخبار: {e}")
@@ -213,30 +244,34 @@ def is_high_impact_news_time(news_list):
     return False, None
 
 def send_news_message(news_list):
-    if not news_list: return
+    if not news_list:
+        return
     high   = [n for n in news_list if n["impact"] == "high"]
     medium = [n for n in news_list if n["impact"] == "medium"]
     msg = "👁️\n\n📰 USD News Today (Gaza Time)\n\n"
     if high:
         msg += "🔴 High Impact — Avoid trading:\n"
-        for n in high: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
+        for n in high:
+            msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
         msg += "\n"
     if medium:
         msg += "🟡 Medium Impact — Stay cautious:\n"
-        for n in medium: msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
+        for n in medium:
+            msg += f"   ⏰ {n['time_str']} | {n['title']}\n"
         msg += "\n"
     msg += "⚠️ Avoid trading 15 minutes before & after high impact news."
     broadcast(msg)
 
 def send_morning_message(news_list):
     now = datetime.now(GAZA_TZ)
-    days_en = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+    days_en = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     day_en  = days_en[now.weekday()]
     high_news = [n for n in news_list if n["impact"] == "high"]
     news_warn = ""
     if high_news:
         news_warn = "\n\n⚠️ High Impact News Today:\n"
-        for n in high_news: news_warn += f"🔴 {n['time_str']} | {n['title']}\n"
+        for n in high_news:
+            news_warn += f"🔴 {n['time_str']} | {n['title']}\n"
     broadcast(
         f"👁️\n\n"
         f"🌅 Good Morning Traders!\n"
@@ -248,17 +283,21 @@ def send_morning_message(news_list):
 
 # ==================== Pivot ====================
 def pivot_high(highs, i, length):
-    if i < length or i + length >= len(highs): return None
+    if i < length or i + length >= len(highs):
+        return None
     val = highs[i]
-    for j in range(1, length+1):
-        if highs[i-j] >= val or highs[i+j] >= val: return None
+    for j in range(1, length + 1):
+        if highs[i - j] >= val or highs[i + j] >= val:
+            return None
     return val
 
 def pivot_low(lows, i, length):
-    if i < length or i + length >= len(lows): return None
+    if i < length or i + length >= len(lows):
+        return None
     val = lows[i]
-    for j in range(1, length+1):
-        if lows[i-j] <= val or lows[i+j] <= val: return None
+    for j in range(1, length + 1):
+        if lows[i - j] <= val or lows[i + j] <= val:
+            return None
     return val
 
 # ==================== تحليل SMC ====================
@@ -282,15 +321,15 @@ def analyze(candles):
         if ph is not None: pending_ph = ph; pending_ph_bar = i - SWING_LEN
         if pl is not None: pending_pl = pl; pending_pl_bar = i - SWING_LEN
 
-        bull_break = pending_ph is not None and i > 0 and closes[i-1] <= pending_ph and closes[i] > pending_ph
-        bear_break = pending_pl is not None and i > 0 and closes[i-1] >= pending_pl and closes[i] < pending_pl
+        bull_break = pending_ph is not None and i > 0 and closes[i - 1] <= pending_ph and closes[i] > pending_ph
+        bear_break = pending_pl is not None and i > 0 and closes[i - 1] >= pending_pl and closes[i] < pending_pl
 
         if bull_break:
             if pending_pl is not None: idm_level = pending_pl; idm_is_high = False; idm_swept = False
             trend = 1
             start = pending_pl_bar if pending_pl_bar != -1 else 0
-            for k in range(1, min(OB_LOOKBACK, i-start)+1):
-                idx = i-k
+            for k in range(1, min(OB_LOOKBACK, i - start) + 1):
+                idx = i - k
                 if idx < start: break
                 if closes[idx] < opens[idx]:
                     ob_list.append({"top": highs[idx], "bottom": lows[idx], "bullish": True,
@@ -303,8 +342,8 @@ def analyze(candles):
             if pending_ph is not None: idm_level = pending_ph; idm_is_high = True; idm_swept = False
             trend = -1
             start = pending_ph_bar if pending_ph_bar != -1 else 0
-            for k in range(1, min(OB_LOOKBACK, i-start)+1):
-                idx = i-k
+            for k in range(1, min(OB_LOOKBACK, i - start) + 1):
+                idx = i - k
                 if idx < start: break
                 if closes[idx] > opens[idx]:
                     ob_list.append({"top": highs[idx], "bottom": lows[idx], "bullish": False,
@@ -327,103 +366,147 @@ def analyze(candles):
                 if closes[i] > ob["top"]: ob["valid"] = False
             if ob["touches"] >= OB_MAX_TOUCH: ob["valid"] = False
 
-        if i == n-2 and (not REQUIRE_IDM or idm_swept):
+        if i == n - 2 and (not REQUIRE_IDM or idm_swept):
             for ob in ob_list:
                 if not ob["valid"] or ob["signaled"]: continue
                 touch = (lows[i] <= ob["top"] and highs[i] >= ob["bottom"]) if USE_WICK_TOUCH else (ob["bottom"] <= closes[i] <= ob["top"])
                 if not touch: continue
                 if trend == 1 and ob["bullish"] and not buy_signal and not sell_signal:
-                    entry = ob["top"]; sl = ob["bottom"]*(1-SL_BUFFER_PCT/100); risk = entry-sl
+                    entry = ob["top"]; sl = ob["bottom"] * (1 - SL_BUFFER_PCT / 100); risk = entry - sl
                     if risk > 0:
                         ob["signaled"] = True; buy_signal = True
-                        sig_entry = entry; sig_sl = sl; sig_tp = entry+risk*MIN_RR; sig_rr = MIN_RR
+                        sig_entry = entry; sig_sl = sl; sig_tp = entry + risk * MIN_RR; sig_rr = MIN_RR
                 elif trend == -1 and not ob["bullish"] and not buy_signal and not sell_signal:
-                    entry = ob["bottom"]; sl = ob["top"]*(1+SL_BUFFER_PCT/100); risk = sl-entry
+                    entry = ob["bottom"]; sl = ob["top"] * (1 + SL_BUFFER_PCT / 100); risk = sl - entry
                     if risk > 0:
                         ob["signaled"] = True; sell_signal = True
-                        sig_entry = entry; sig_sl = sl; sig_tp = entry-risk*MIN_RR; sig_rr = MIN_RR
+                        sig_entry = entry; sig_sl = sl; sig_tp = entry - risk * MIN_RR; sig_rr = MIN_RR
 
     return {"buy": buy_signal, "sell": sell_signal, "entry": sig_entry,
             "sl": sig_sl, "tp": sig_tp, "rr": sig_rr, "trend": trend,
             "time": candles[-1]["time"] if candles else ""}
 
+# ==================== حساب الربح/الخسارة ====================
+def calc_points_and_money(entry, exit_price, is_buy):
+    """يرجع (النقاط، الدولار) للحركة بين entry و exit حسب نوع الصفقة."""
+    points = (exit_price - entry) if is_buy else (entry - exit_price)
+    money  = points * CONTRACT_SIZE * LOT_SIZE
+    return points, money
+
+# ==================== إرسال إشارة جديدة ====================
+def send_signal_message(result):
+    """يبعث رسالة الإشارة مرة وحدة بس، بثلاث أهداف وستوب."""
+    is_buy   = result["buy"]
+    entry    = result["entry"]
+    sl       = result["sl"]
+    risk     = abs(entry - sl)
+    order_type = "Buy Limit" if is_buy else "Sell Limit"
+
+    if is_buy:
+        t1 = entry + risk * 1.0
+        t2 = entry + risk * 1.5
+        t3 = entry + risk * 2.0
+    else:
+        t1 = entry - risk * 1.0
+        t2 = entry - risk * 1.5
+        t3 = entry - risk * 2.0
+
+    msg = (
+        f"👁️\n\n"
+        f"🥇 #XAUUSD | {order_type} {entry:.2f}\n\n"
+        f"✅ Target 1 : {t1:.2f} | Target 2 : {t2:.2f} | "
+        f"Target 3 : {t3:.2f}\n\n"
+        f"❗ Stoploss : {sl:.2f}"
+    )
+    broadcast(msg)
+
+    return {
+        "type": "BUY" if is_buy else "SELL",
+        "entry": entry,
+        "sl": sl,
+        "t1": t1, "t2": t2, "t3": t3,
+        "hit_t1": False, "hit_t2": False,
+        "open_time": result["time"],
+    }
+
 # ==================== متابعة الصفقة ====================
 def check_trade_result(active_trade, candles):
-    """يتابع الصفقة المفتوحة ويرجع النتيجة"""
+    """يتابع الصفقة المفتوحة، يعلن كل هدف يتحقق، ويقفل الصفقة عند TP3 أو SL
+       مع إعلان الربح/الخسارة بالنقاط والدولار."""
     if not active_trade or not candles:
         return active_trade
 
-    is_buy  = active_trade["type"] == "BUY"
-    entry   = active_trade["entry"]
-    sl      = active_trade["sl"]
-    tp      = active_trade["tp"]
-    opened  = active_trade["open_time"]
+    is_buy = active_trade["type"] == "BUY"
+    entry  = active_trade["entry"]
+    sl     = active_trade["sl"]
+    opened = active_trade["open_time"]
 
-    # شوف آخر الشموع بعد وقت الدخول
     for c in candles:
         if c["time"] <= opened:
             continue
 
-        if is_buy:
-            if c["low"] <= sl:
-                # ستوب
-                loss = sl - entry
-                broadcast(
-                    f"👁️\n\n"
-                    f"🛑 Stoploss Hit.\n\n"
-                    f"🥇 #XAUUSD | BUY\n"
-                    f"Entry: {entry:.2f} | SL: {sl:.2f}\n\n"
-                    f"💪 Losses are part of the game.\n"
-                    f"Stay disciplined — the next setup will be better."
-                )
-                print(f"❌ ستوب BUY @ {sl:.2f}")
-                return None
+        # ستوب لوس
+        hit_sl = (c["low"] <= sl) if is_buy else (c["high"] >= sl)
+        if hit_sl:
+            points, money = calc_points_and_money(entry, sl, is_buy)
+            broadcast(
+                f"👁️\n\n"
+                f"🛑 Stoploss Hit.\n\n"
+                f"🥇 #XAUUSD | {active_trade['type']}\n"
+                f"Entry: {entry:.2f} | SL: {sl:.2f}\n"
+                f"📉 الخسارة: {abs(points):.2f} نقطة (~{abs(money):.2f}$ للوت {LOT_SIZE})\n\n"
+                f"💪 Losses are part of the game.\n"
+                f"Stay disciplined — the next setup will be better."
+            )
+            print(f"❌ ستوب {active_trade['type']} @ {sl:.2f}")
+            return None
 
-            if c["high"] >= tp:
-                # هدف
-                profit = tp - entry
+        # هدف 1
+        if not active_trade["hit_t1"]:
+            hit_t1 = (c["high"] >= active_trade["t1"]) if is_buy else (c["low"] <= active_trade["t1"])
+            if hit_t1:
+                active_trade["hit_t1"] = True
+                points, money = calc_points_and_money(entry, active_trade["t1"], is_buy)
                 broadcast(
-                    f"👁️\n\n"
-                    f"♥️ Target Hit! 🎯\n\n"
-                    f"🥇 #XAUUSD | BUY\n"
-                    f"✅ Entry: {entry:.2f} → Target: {tp:.2f}\n\n"
-                    f"🔥 Everyone in profit!\n"
-                    f"💰 Well done for staying patient."
+                    f"👁️\n\n✅ Target 1 Hit! 🎯\n\n"
+                    f"🥇 #XAUUSD | {active_trade['type']}\n"
+                    f"📈 الربح: +{points:.2f} نقطة (~{money:.2f}$ للوت {LOT_SIZE})"
                 )
-                print(f"✅ هدف BUY @ {tp:.2f}")
-                return None
 
-        else:  # SELL
-            if c["high"] >= sl:
+        # هدف 2
+        if not active_trade["hit_t2"]:
+            hit_t2 = (c["high"] >= active_trade["t2"]) if is_buy else (c["low"] <= active_trade["t2"])
+            if hit_t2:
+                active_trade["hit_t2"] = True
+                points, money = calc_points_and_money(entry, active_trade["t2"], is_buy)
                 broadcast(
-                    f"👁️\n\n"
-                    f"🛑 Stoploss Hit.\n\n"
-                    f"🥇 #XAUUSD | SELL\n"
-                    f"Entry: {entry:.2f} | SL: {sl:.2f}\n\n"
-                    f"💪 Losses are part of the game.\n"
-                    f"Stay disciplined — the next setup will be better."
+                    f"👁️\n\n✅ Target 2 Hit! 🎯\n\n"
+                    f"🥇 #XAUUSD | {active_trade['type']}\n"
+                    f"📈 الربح: +{points:.2f} نقطة (~{money:.2f}$ للوت {LOT_SIZE})"
                 )
-                print(f"❌ ستوب SELL @ {sl:.2f}")
-                return None
 
-            if c["low"] <= tp:
-                broadcast(
-                    f"👁️\n\n"
-                    f"♥️ Target Hit! 🎯\n\n"
-                    f"🥇 #XAUUSD | SELL\n"
-                    f"✅ Entry: {entry:.2f} → Target: {tp:.2f}\n\n"
-                    f"🔥 Everyone in profit!\n"
-                    f"💰 Well done for staying patient."
-                )
-                print(f"✅ هدف SELL @ {tp:.2f}")
-                return None
+        # هدف 3 - إغلاق الصفقة بالكامل
+        hit_t3 = (c["high"] >= active_trade["t3"]) if is_buy else (c["low"] <= active_trade["t3"])
+        if hit_t3:
+            points, money = calc_points_and_money(entry, active_trade["t3"], is_buy)
+            broadcast(
+                f"👁️\n\n♥️ Final Target Hit! 🎯\n\n"
+                f"🥇 #XAUUSD | {active_trade['type']}\n"
+                f"✅ Entry: {entry:.2f} → Target 3: {active_trade['t3']:.2f}\n"
+                f"📈 الربح الكلي: +{points:.2f} نقطة (~{money:.2f}$ للوت {LOT_SIZE})\n\n"
+                f"🔥 Everyone in profit!\n"
+                f"💰 Well done for staying patient."
+            )
+            print(f"✅ هدف نهائي {active_trade['type']} @ {active_trade['t3']:.2f}")
+            return None
 
     return active_trade  # الصفقة لسا مفتوحة
 
 # ==================== الحلقة الرئيسية ====================
 def main():
+    acquire_single_instance_lock()
     broadcast("👁️\n\n✅ Bot is now active and monitoring the market!\n📊 #XAUUSD | M5")
-    print("✅ البوت شغّال - Yahoo Finance | XAUUSD M5")
+    print("✅ البوت شغّال - Twelve Data | XAUUSD M5")
 
     offset            = None
     last_signal_time  = ""
@@ -432,103 +515,79 @@ def main():
     news_alert_sent   = set()
     daily_news        = []
     last_candle_check = 0
-    active_trade      = None  # الصفقة المفتوحة الحالية
+    active_trade      = None
 
-    while True:
-        try:
-            offset    = process_updates(offset)
-            now_gaza  = datetime.now(GAZA_TZ)
-            today_str = now_gaza.strftime("%Y-%m-%d")
+    try:
+        while True:
+            try:
+                offset    = process_updates(offset)
+                now_gaza  = datetime.now(GAZA_TZ)
+                today_str = now_gaza.strftime("%Y-%m-%d")
 
-            if news_sent_date != today_str:
-                daily_news     = get_usd_news()
-                news_sent_date = today_str
+                if news_sent_date != today_str:
+                    daily_news     = get_usd_news()
+                    news_sent_date = today_str
 
-            if now_gaza.hour == 8 and now_gaza.minute == 0 and morning_sent_date != today_str:
-                send_morning_message(daily_news)
-                send_news_message(daily_news)
-                morning_sent_date = today_str
+                if now_gaza.hour == 8 and now_gaza.minute == 0 and morning_sent_date != today_str:
+                    send_morning_message(daily_news)
+                    send_news_message(daily_news)
+                    morning_sent_date = today_str
 
-            for news in daily_news:
-                if news["impact"] == "high":
-                    diff = (news["time"] - now_gaza).total_seconds() / 60
-                    key  = news["time_str"] + "_" + today_str
-                    if 14 <= diff <= 15 and key+"_pre" not in news_alert_sent:
-                        news_alert_sent.add(key+"_pre")
-                        broadcast(
-                            f"👁️\n\n"
-                            f"⚠️ High Impact News in 15 minutes!\n\n"
-                            f"🔴 {news['title']}\n"
-                            f"⏰ {news['time_str']} Gaza Time\n\n"
-                            f"🚫 Do NOT open any trades now.\n"
-                            f"Wait 15 minutes after the release.")
-                    if -16 <= diff <= -15 and key+"_post" not in news_alert_sent:
-                        news_alert_sent.add(key+"_post")
-                        broadcast(
-                            f"👁️\n\n"
-                            f"✅ News is over — Market is settling.\n\n"
-                            f"📰 {news['title']} | {news['time_str']}\n\n"
-                            f"🟢 You may look for setups — but stay cautious.")
+                for news in daily_news:
+                    if news["impact"] == "high":
+                        diff = (news["time"] - now_gaza).total_seconds() / 60
+                        key  = news["time_str"] + "_" + today_str
+                        if 14 <= diff <= 15 and key + "_pre" not in news_alert_sent:
+                            news_alert_sent.add(key + "_pre")
+                            broadcast(
+                                f"👁️\n\n"
+                                f"⚠️ High Impact News in 15 minutes!\n\n"
+                                f"🔴 {news['title']}\n"
+                                f"⏰ {news['time_str']} Gaza Time\n\n"
+                                f"🚫 Do NOT open any trades now.\n"
+                                f"Wait 15 minutes after the release.")
+                        if -16 <= diff <= -15 and key + "_post" not in news_alert_sent:
+                            news_alert_sent.add(key + "_post")
+                            broadcast(
+                                f"👁️\n\n"
+                                f"✅ News is over — Market is settling.\n\n"
+                                f"📰 {news['title']} | {news['time_str']}\n\n"
+                                f"🟢 You may look for setups — but stay cautious.")
 
-            now_ts = time.time()
-            if now_ts - last_candle_check >= 300:
-                last_candle_check = now_ts
-                candles = get_candles()
+                now_ts = time.time()
+                if now_ts - last_candle_check >= 300:
+                    last_candle_check = now_ts
+                    candles = get_candles()
 
-                if candles:
-                    # متابعة الصفقة المفتوحة
-                    if active_trade:
-                        active_trade = check_trade_result(active_trade, candles)
+                    if candles:
+                        if active_trade:
+                            active_trade = check_trade_result(active_trade, candles)
 
-                    # البحث عن إشارة جديدة لو ما في صفقة مفتوحة
-                    if not active_trade:
-                        in_news, news_obj = is_high_impact_news_time(daily_news)
-                        result = analyze(candles)
-                        current_time = result["time"]
+                        if not active_trade:
+                            in_news, news_obj = is_high_impact_news_time(daily_news)
+                            result = analyze(candles)
+                            current_time = result["time"]
 
-                        if (result["buy"] or result["sell"]) and current_time != last_signal_time:
-                            last_signal_time = current_time
-                            direction = "🟢 شراء (BUY)" if result["buy"] else "🔴 بيع (SELL)"
-                            emoji = "📈" if result["buy"] else "📉"
+                            if (result["buy"] or result["sell"]) and current_time != last_signal_time:
+                                last_signal_time = current_time
 
-                            if in_news:
-                                broadcast(
-                                    f"👁️\n\n"
-                                    f"⚠️ Setup detected but we will NOT enter.\n\n"
-                                    f"🔴 High Impact News active: {news_obj['title']}\n"
-                                    f"⏰ {news_obj['time_str']} Gaza Time\n\n"
-                                    f"🙌 Sometimes avoiding a trade is also a profit.")
-                            else:
-                                tp1 = result['entry'] + (result['tp'] - result['entry']) * 0.33 if result['buy'] else result['entry'] - (result['entry'] - result['tp']) * 0.33
-                                tp2 = result['entry'] + (result['tp'] - result['entry']) * 0.66 if result['buy'] else result['entry'] - (result['entry'] - result['tp']) * 0.66
-                                tp3 = result['tp']
-                                side = "Buy Limit" if result['buy'] else "Sell Limit"
-                                broadcast(
-                                    f"👁️\n\n"
-                                    f"🥇 #XAUUSD | {side} {result['entry']:.2f}\n\n"
-                                    f"✅ Target 1 : {tp1:.2f} | Target 2 : {tp2:.2f} | Target 3 : {tp3:.2f}\n\n"
-                                    f"❕Stoploss : {result['sl']:.2f}"
-                                )
+                                if in_news:
+                                    broadcast(
+                                        f"👁️\n\n"
+                                        f"⚠️ Setup detected but we will NOT enter.\n\n"
+                                        f"🔴 High Impact News active: {news_obj['title']}\n"
+                                        f"⏰ {news_obj['time_str']} Gaza Time\n\n"
+                                        f"🙌 Sometimes avoiding a trade is also a profit.")
+                                else:
+                                    active_trade = send_signal_message(result)
 
-                                # حفظ الصفقة لمتابعتها
-                                active_trade = {
-                                    "type"     : "BUY" if result["buy"] else "SELL",
-                                    "entry"    : result["entry"],
-                                    "sl"       : result["sl"],
-                                    "tp"       : result["tp"],
-                                    "rr"       : result["rr"],
-                                    "open_time": current_time
-                                }
-                                print(f"✅ إشارة: {direction} @ {result['entry']:.2f}")
+                time.sleep(2)
 
-                    trend_txt = "صاعد 📈" if candles[-1]["close"] > candles[-2]["close"] else "هابط 📉"
-                    trade_status = f"| صفقة مفتوحة: {active_trade['type']}" if active_trade else ""
-                    print(f"[{now_gaza.strftime('%H:%M:%S')}] {trend_txt} | {candles[-1]['close']:.2f} {trade_status}")
-
-        except Exception as e:
-            print(f"❌ خطأ: {e}")
-
-        time.sleep(2)
+            except Exception as e:
+                print(f"⚠️ خطأ بالحلقة الرئيسية: {e}")
+                time.sleep(5)
+    finally:
+        release_single_instance_lock()
 
 if __name__ == "__main__":
     main()
