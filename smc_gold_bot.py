@@ -11,6 +11,8 @@ TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
 BROADCASTER_ID = "6360489611"
 MEMBERS_FILE   = "members.json"
+OFFSET_FILE    = "offset.json"
+STATE_FILE     = "bot_state.json"
 
 SWING_LEN      = 10
 OB_LOOKBACK    = 60
@@ -61,6 +63,38 @@ def load_members():
 def save_members(members):
     with open(MEMBERS_FILE, "w") as f:
         json.dump(members, f)
+
+def load_offset():
+    if os.path.exists(OFFSET_FILE):
+        try:
+            with open(OFFSET_FILE, "r") as f:
+                return json.load(f).get("offset")
+        except Exception:
+            return None
+    return None
+
+def save_offset(offset):
+    try:
+        with open(OFFSET_FILE, "w") as f:
+            json.dump({"offset": offset}, f)
+    except Exception:
+        pass
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"active_trade": None, "last_signal_time": "", "bot_started_at": ""}
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
 
 def add_member(chat_id):
     members = load_members()
@@ -150,6 +184,7 @@ def get_updates(offset=None):
 def process_updates(offset):
     for update in get_updates(offset):
         offset = update["update_id"] + 1
+        save_offset(offset)
         try:
             msg     = update.get("message", {})
             chat_id = msg.get("chat", {}).get("id")
@@ -505,17 +540,37 @@ def check_trade_result(active_trade, candles):
 # ==================== الحلقة الرئيسية ====================
 def main():
     acquire_single_instance_lock()
-    broadcast("👁️\n\n✅ Bot is now active and monitoring the market!\n📊 #XAUUSD | M5")
+
+    state             = load_state()
+    now_iso           = datetime.now(GAZA_TZ).isoformat()
+    last_start_iso    = state.get("bot_started_at", "")
+    # لو انعاد التشغيل خلال أقل من 3 دقائق من آخر مرة، هاد مؤشر crash loop
+    # منبعت رسالة "البوت اشتغل" بس منسكت عن التكرار
+    skip_startup_msg = False
+    if last_start_iso:
+        try:
+            last_dt = datetime.fromisoformat(last_start_iso)
+            if (datetime.now(GAZA_TZ) - last_dt).total_seconds() < 180:
+                skip_startup_msg = True
+                print("⚠️ إعادة تشغيل سريعة مكتشفة (crash loop محتمل) — تجاهل رسالة البدء")
+        except Exception:
+            pass
+
+    if not skip_startup_msg:
+        broadcast("👁️\n\n✅ Bot is now active and monitoring the market!\n📊 #XAUUSD | M5")
     print("✅ البوت شغّال - Twelve Data | XAUUSD M5")
 
-    offset            = None
-    last_signal_time  = ""
+    state["bot_started_at"] = now_iso
+    save_state(state)
+
+    offset            = load_offset()
+    last_signal_time  = state.get("last_signal_time", "")
     morning_sent_date = ""
     news_sent_date    = ""
     news_alert_sent   = set()
     daily_news        = []
     last_candle_check = 0
-    active_trade      = None
+    active_trade      = state.get("active_trade")
 
     try:
         while True:
@@ -562,6 +617,8 @@ def main():
                     if candles:
                         if active_trade:
                             active_trade = check_trade_result(active_trade, candles)
+                            state["active_trade"] = active_trade
+                            save_state(state)
 
                         if not active_trade:
                             in_news, news_obj = is_high_impact_news_time(daily_news)
@@ -570,6 +627,7 @@ def main():
 
                             if (result["buy"] or result["sell"]) and current_time != last_signal_time:
                                 last_signal_time = current_time
+                                state["last_signal_time"] = last_signal_time
 
                                 if in_news:
                                     broadcast(
@@ -580,6 +638,9 @@ def main():
                                         f"🙌 Sometimes avoiding a trade is also a profit.")
                                 else:
                                     active_trade = send_signal_message(result)
+                                    state["active_trade"] = active_trade
+
+                                save_state(state)
 
                 time.sleep(2)
 
