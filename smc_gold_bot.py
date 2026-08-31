@@ -10,10 +10,10 @@ TELEGRAM_TOKEN = "8800189995:AAEAluegBqFTM_fXko38IS92efpEsOKDYqA"
 ADMIN_IDS      = ["6360489611", "8315710670", "1266693223"]
 BROADCASTER_ID = "6360489611"
 
-# مكان تخزين الملفات - لو ضفت Volume على ريلوي وحطيت متغير بيئة DATA_DIR
-# (مثلاً /data)، البيانات (الأعضاء والشموع) بتضل محفوظة حتى بعد أي Redeploy.
-# لو ما ضفته، بتتخزن بمجلد المشروع العادي (بينمسح مع كل Redeploy).
-DATA_DIR = os.environ.get("DATA_DIR", ".")
+# مكان تخزين الملفات - لو ضفت Volume على ريلوي، هو بحط متغير
+# RAILWAY_VOLUME_MOUNT_PATH تلقائياً والكود بياخده لحاله (بدون أي خطوة إضافية).
+# بديل يدوي: تقدر تحط متغير DATA_DIR بنفسك لو حبيت مسار مختلف.
+DATA_DIR = os.environ.get("DATA_DIR") or os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or "."
 os.makedirs(DATA_DIR, exist_ok=True)
 MEMBERS_FILE = os.path.join(DATA_DIR, "members.json")
 
