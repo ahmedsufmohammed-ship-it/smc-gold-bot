@@ -3,7 +3,7 @@ import time
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from xml.etree import ElementTree as ET
 import pytz
 
@@ -30,7 +30,7 @@ SESSION_END_UTC   = 17  # 17:00 UTC (5:00 عصراً)
 
 def is_trading_session():
     """يرجع True إذا الوقت الحالي جوا نافذة 08:00-17:00 GMT."""
-    hour_utc = datetime.utcnow().hour
+    hour_utc = datetime.now(timezone.utc).hour
     return SESSION_START_UTC <= hour_utc < SESSION_END_UTC
 
 # حجم اللوت المستخدم لحساب الربح/الخسارة بالدولار (1 لوت = 100 أونصة ذهب)
