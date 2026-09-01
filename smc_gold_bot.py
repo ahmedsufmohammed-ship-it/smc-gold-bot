@@ -56,7 +56,13 @@ def release_single_instance_lock():
 def load_members():
     if os.path.exists(MEMBERS_FILE):
         with open(MEMBERS_FILE, "r") as f:
-            return json.load(f)
+            members = json.load(f)
+        # تنظيف أي تكرار قديم صار بسبب race condition أيام تشغيل نسختين بالغلط
+        deduped = list(dict.fromkeys(str(m) for m in members))
+        if len(deduped) != len(members):
+            print(f"🧹 تم حذف {len(members) - len(deduped)} آيدي مكرر من members.json")
+            save_members(deduped)
+        return deduped
     save_members(ADMIN_IDS.copy())
     return ADMIN_IDS.copy()
 
@@ -101,6 +107,7 @@ def add_member(chat_id):
     chat_id = str(chat_id)
     if chat_id not in members:
         members.append(chat_id)
+        members = list(dict.fromkeys(members))  # حماية إضافية من التكرار
         save_members(members)
         return True
     return False
