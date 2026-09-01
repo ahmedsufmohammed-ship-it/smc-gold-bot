@@ -24,9 +24,9 @@ USE_WICK_TOUCH = True
 REQUIRE_IDM    = False
 GAZA_TZ        = pytz.timezone("Asia/Gaza")
 
-# نافذة التداول: 08:00 - 17:00 بتوقيت غرينتش (GMT/UTC) — تغطي جلسة لندن وتداخلها مع نيويورك
-SESSION_START_UTC = 8   # 08:00 UTC
-SESSION_END_UTC   = 17  # 17:00 UTC
+# نافذة التداول: 13:00 - 17:00 بتوقيت غرينتش (GMT/UTC)
+SESSION_START_UTC = 13  # 13:00 UTC (1:00 ظهراً)
+SESSION_END_UTC   = 17  # 17:00 UTC (5:00 عصراً)
 
 def is_trading_session():
     """يرجع True إذا الوقت الحالي جوا نافذة 08:00-17:00 GMT."""
@@ -707,7 +707,7 @@ def main():
                                 f"🟢 You may look for setups — but stay cautious.")
 
                 now_ts = time.time()
-                if is_trading_session() and (now_ts - last_candle_check >= 41):
+                if is_trading_session() and (now_ts - last_candle_check >= 18):
                     last_candle_check = now_ts
                     candles = get_candles()
 
