@@ -707,7 +707,10 @@ def main():
                                 f"🟢 You may look for setups — but stay cautious.")
 
                 now_ts = time.time()
-                if is_trading_session() and (now_ts - last_candle_check >= 18):
+                if not is_trading_session():
+                    time.sleep(5)
+                    continue
+                if now_ts - last_candle_check >= 20:
                     last_candle_check = now_ts
                     candles = get_candles()
 
