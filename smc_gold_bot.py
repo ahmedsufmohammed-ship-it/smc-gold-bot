@@ -24,6 +24,15 @@ USE_WICK_TOUCH = True
 REQUIRE_IDM    = False
 GAZA_TZ        = pytz.timezone("Asia/Gaza")
 
+# نافذة التداول: 08:00 - 17:00 بتوقيت غرينتش (GMT/UTC) — تغطي جلسة لندن وتداخلها مع نيويورك
+SESSION_START_UTC = 8   # 08:00 UTC
+SESSION_END_UTC   = 17  # 17:00 UTC
+
+def is_trading_session():
+    """يرجع True إذا الوقت الحالي جوا نافذة 08:00-17:00 GMT."""
+    hour_utc = datetime.utcnow().hour
+    return SESSION_START_UTC <= hour_utc < SESSION_END_UTC
+
 # حجم اللوت المستخدم لحساب الربح/الخسارة بالدولار (1 لوت = 100 أونصة ذهب)
 LOT_SIZE       = 0.01
 CONTRACT_SIZE  = 100  # أونصة لكل لوت قياسي
@@ -436,6 +445,24 @@ def calc_points_and_money(entry, exit_price, is_buy):
     return points, money
 
 # ==================== إرسال إشارة جديدة ====================
+def get_live_price():
+    """يجيب السعر اللحظي الحقيقي (مش سعر الشمعة المغلقة) للتحقق قبل الإرسال."""
+    try:
+        r = requests.get(
+            "https://api.twelvedata.com/price",
+            params={
+                "symbol": "XAU/USD",
+                "apikey": os.environ.get("TWELVEDATA_API_KEY", "0cef5bb56a314b6289f3db0b648f84b5")
+            }, timeout=10)
+        data = r.json()
+        return float(data["price"]) if "price" in data else None
+    except Exception as e:
+        print(f"⚠️ تعذر جلب السعر اللحظي: {e}")
+        return None
+
+# الحد الأقصى المسموح للفرق بين سعر الإشارة (المتأخر) والسعر اللحظي الحقيقي
+MAX_STALE_POINTS = 3.0
+
 def send_signal_message(result):
     """يبعث رسالة الإشارة مرة وحدة بس، بثلاث أهداف وستوب."""
     is_buy   = result["buy"]
@@ -470,6 +497,68 @@ def send_signal_message(result):
         "hit_t1": False, "hit_t2": False,
         "open_time": result["time"],
     }
+
+def check_trade_result_live(active_trade, live_price):
+    """فحص سريع للصفقة المفتوحة بالسعر اللحظي (كل ثواني قليلة) بدل الانتظار لدورة الشموع."""
+    if not active_trade or live_price is None:
+        return active_trade
+
+    is_buy = active_trade["type"] == "BUY"
+    entry  = active_trade["entry"]
+    sl     = active_trade["sl"]
+
+    hit_sl = (live_price <= sl) if is_buy else (live_price >= sl)
+    if hit_sl:
+        points, money = calc_points_and_money(entry, sl, is_buy)
+        broadcast(
+            f"👁️\n\n"
+            f"🛑 Stoploss Hit.\n\n"
+            f"🥇 #XAUUSD | {active_trade['type']}\n"
+            f"Entry: {entry:.2f} | SL: {sl:.2f}\n"
+            f"📉 الخسارة: {abs(points):.2f} نقطة (~{abs(money):.2f}$ للوت {LOT_SIZE})\n\n"
+            f"💪 Losses are part of the game.\n"
+            f"Stay disciplined — the next setup will be better."
+        )
+        print(f"❌ ستوب لحظي {active_trade['type']} @ {sl:.2f}")
+        return None
+
+    if not active_trade["hit_t1"]:
+        hit_t1 = (live_price >= active_trade["t1"]) if is_buy else (live_price <= active_trade["t1"])
+        if hit_t1:
+            active_trade["hit_t1"] = True
+            points, money = calc_points_and_money(entry, active_trade["t1"], is_buy)
+            broadcast(
+                f"👁️\n\n✅ Target 1 Hit! 🎯\n\n"
+                f"🥇 #XAUUSD | {active_trade['type']}\n"
+                f"📈 الربح: +{points:.2f} نقطة (~{money:.2f}$ للوت {LOT_SIZE})"
+            )
+
+    if not active_trade["hit_t2"]:
+        hit_t2 = (live_price >= active_trade["t2"]) if is_buy else (live_price <= active_trade["t2"])
+        if hit_t2:
+            active_trade["hit_t2"] = True
+            points, money = calc_points_and_money(entry, active_trade["t2"], is_buy)
+            broadcast(
+                f"👁️\n\n✅ Target 2 Hit! 🎯\n\n"
+                f"🥇 #XAUUSD | {active_trade['type']}\n"
+                f"📈 الربح: +{points:.2f} نقطة (~{money:.2f}$ للوت {LOT_SIZE})"
+            )
+
+    hit_t3 = (live_price >= active_trade["t3"]) if is_buy else (live_price <= active_trade["t3"])
+    if hit_t3:
+        points, money = calc_points_and_money(entry, active_trade["t3"], is_buy)
+        broadcast(
+            f"👁️\n\n♥️ Final Target Hit! 🎯\n\n"
+            f"🥇 #XAUUSD | {active_trade['type']}\n"
+            f"✅ Entry: {entry:.2f} → Target 3: {active_trade['t3']:.2f}\n"
+            f"📈 الربح الكلي: +{points:.2f} نقطة (~{money:.2f}$ للوت {LOT_SIZE})\n\n"
+            f"🔥 Everyone in profit!\n"
+            f"💰 Well done for staying patient."
+        )
+        print(f"✅ هدف نهائي لحظي {active_trade['type']} @ {active_trade['t3']:.2f}")
+        return None
+
+    return active_trade
 
 # ==================== متابعة الصفقة ====================
 def check_trade_result(active_trade, candles):
@@ -577,6 +666,7 @@ def main():
     news_alert_sent   = set()
     daily_news        = []
     last_candle_check = 0
+    last_live_check   = 0
     active_trade      = state.get("active_trade")
 
     try:
@@ -617,7 +707,7 @@ def main():
                                 f"🟢 You may look for setups — but stay cautious.")
 
                 now_ts = time.time()
-                if now_ts - last_candle_check >= 300:
+                if is_trading_session() and (now_ts - last_candle_check >= 41):
                     last_candle_check = now_ts
                     candles = get_candles()
 
@@ -636,7 +726,19 @@ def main():
                                 last_signal_time = current_time
                                 state["last_signal_time"] = last_signal_time
 
-                                if in_news:
+                                # تحقق من السعر اللحظي قبل الإرسال لتفادي إشارة متأخرة
+                                live_price = get_live_price()
+                                is_stale = False
+                                if live_price is not None:
+                                    diff = abs(live_price - result["entry"])
+                                    if diff > MAX_STALE_POINTS:
+                                        is_stale = True
+                                        print(f"⏭️ تجاهل إشارة متأخرة: سعر الإشارة {result['entry']:.2f} "
+                                              f"vs السعر اللحظي {live_price:.2f} (فرق {diff:.2f} نقطة)")
+
+                                if is_stale:
+                                    pass  # تجاهل صامت، السعر تحرك كتير قبل ما توصل الإشارة
+                                elif in_news:
                                     broadcast(
                                         f"👁️\n\n"
                                         f"⚠️ Setup detected but we will NOT enter.\n\n"
